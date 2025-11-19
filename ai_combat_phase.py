@@ -1,15 +1,10 @@
-from typing import List, Dict, Tuple, Optional, Set
-from itertools import permutations, product
-import heapq
-
 import pygame
-
-from examples.visualizer import HexVisualizer
+from typing import List, Dict, Tuple, Optional, Set
+from visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
-from scipy.optimize import linear_sum_assignment
-from w9_pathfinding.visualization import plot_grid, animate_grid
+from w9_pathfinding.visualization import animate_grid
 
 class Solution:
     def __init__(self) -> None:

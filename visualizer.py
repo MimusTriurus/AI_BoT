@@ -363,14 +363,16 @@ class HexVisualizer:
             if self.show_grid:
                 self.draw_grid()
 
-            for u_idx, path in solution['paths'].items():
-                self.draw_path(path)
+            for u_id, path in solution['paths'].items():
+                color = 'red' if u_id > 100 else 'green'
+                self.draw_path(path, color)
 
             for target in targets:
                 target_destroyed = target['current_hp'] <= 0
                 self.draw_target(target['pos'], target, target_destroyed)
 
             for u_idx, unit in enumerate(units):
+                u_idx = unit['id'] if 'id' in unit else u_idx
                 if u_idx in self.animation_state:
                     anim = self.animation_state[u_idx]
 
@@ -383,7 +385,7 @@ class HexVisualizer:
                         y = start_pos[1] + (end_pos[1] - start_pos[1]) * anim['progress']
 
                         unit_data = {'id': u_idx}
-                        self.draw_unit(unit['start'], unit_data, (x, y))
+                        self.draw_unit(unit['pos'], unit_data, (x, y))
 
                     elif anim['state'] == AnimationState.ATTACKING:
                         if 'target_idx' in anim:
@@ -400,11 +402,11 @@ class HexVisualizer:
                         self.draw_unit(pos, unit_data)
                 else:
                     unit_data = {'id': u_idx}
-                    self.draw_unit(unit['start'], unit_data)
+                    self.draw_unit(unit['pos'], unit_data)
 
-            self.draw_damage_numbers(dt)
+            #self.draw_damage_numbers(dt)
 
-            self.draw_info_panel(solution, units, targets)
+            #self.draw_info_panel(solution, units, targets)
 
             if self.paused:
                 pause_text = self.font_large.render("PAUSED", True, (255, 255, 0))

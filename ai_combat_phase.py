@@ -467,7 +467,11 @@ if __name__ == "__main__":
 
     visualizer = HexVisualizer(grid)
     while True:
-        restart = visualizer.animate_solution(solution.__dict__, units, targets)
+        solution_dict = {
+            'assignments': [],
+            'paths': solution.__dict__['paths']
+        }
+        restart = visualizer.animate_solution(solution_dict, units, targets)
         if restart:
             for target in targets:
                 target['current_hp'] = target['hp']

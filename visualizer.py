@@ -31,7 +31,7 @@ class HexVisualizer:
 
         return x, y
 
-    def __init__(self, grid, width=1200, height=800):
+    def __init__(self, grid, width=1200, height=900):
         pygame.init()
         self.screen = pygame.display.set_mode((width, height))
         pygame.display.set_caption("Hex Tactical Visualization")

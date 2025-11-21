@@ -29,6 +29,7 @@ class UnitType(Enum):
     TANK                = 0
     LAND_TRANSPORT      = 1
     ABSTRACT_TARGET     = 2
+    LAV                 = 4
 
 @dataclass
 class Squad:
@@ -832,14 +833,18 @@ def insert_after(lst, target, new_value):
 # Пример использования
 def example_usage():
     weights = [
-        # 0   1   2   3   4   5   6
-        [ 1,  1,  1,  1,  1,  1,  1],  # 0
-        [ 1,  1,  1,  1,  1,  1,  1],  # 1
-        [ 1,  1,  1,  1,  1,  1,  1],  # 2
-        [ 1,  1,  1,  1,  1,  1,  1],  # 3
-        [ 1,  1,  1,  1,  1,  1,  1],  # 4
-        [ 1,  1,  1,  1,  1,  1,  1],  # 5
-        [ 1,  1,  1,  1,  1,  1,  1],  # 6
+        # 0   1   2   3   4   5   6   7   8   9   10
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 0
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 1
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 2
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 3
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 4
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 5
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 6
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 7
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 8
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 9
+        [ 1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1 ],  # 10
     ]
 
     grid = HexGrid(weights=weights, edge_collision=True, layout=HexLayout.odd_q)
@@ -848,12 +853,19 @@ def example_usage():
     mapf = CBS(grid)
     planner = TransportPlanner(grid, mapf, pf, rt)
 
-    # move, weapon damage, weapon range, hp, value, capacity (transport)
+    # m - move,
+    # w - weapon
+    # d - damage,
+    # r - weapon range,
+    # h - hp,
+    # v - value,
+    # c - capacity (transport)
     unit_data = {
         #                                m   d  r  h  v  c
-        UnitType.TANK:                  (1 , 2, 1, 5, 2, 0),
-        UnitType.LAND_TRANSPORT:        (15, 0, 0, 3, 1, 2),
-        UnitType.ABSTRACT_TARGET:       (0 , 0, 0, 3, 9, 0),
+        UnitType.TANK:                  ( 2 ,  2,  1,  5,  2,  0 ),
+        UnitType.LAND_TRANSPORT:        ( 15,  0,  0,  3,  1,  2 ),
+        UnitType.ABSTRACT_TARGET:       ( 0 ,  0,  0,  3,  9,  0 ),
+        UnitType.LAV:                   ( 1 ,  1,  1,  4,  1,  0 ),
     }
 
     def make_unit(u_id, pos, unit_type: UnitType):
@@ -883,6 +895,8 @@ def example_usage():
         # group 2
         make_unit(2, (0, 5), UnitType.TANK),
         make_unit(3, (3, 6), UnitType.TANK),
+
+        make_unit(4, (0, 1), UnitType.LAV),
     ]
 
     targets = [

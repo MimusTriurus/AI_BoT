@@ -135,14 +135,14 @@ class TransportPlan:
         self.transport: dict = transport
         self.target: dict = target
         self.passengers: List[dict] = passengers
-        self.path = path
-        self.grid = grid
-        self.pf = pf
+        self.path: Dict[str, Tuple[int, int]] = path
+        self.grid: HexGrid = grid
+        self.pf: AStar = pf
 
         self.meeting_points: Dict[str, Tuple[int, int]] = self.calculate_meeting_points()
-        self.delivery_path = self.calculate_delivery_path()
+        self.delivery_path: List[Tuple[int, int]] = self.calculate_delivery_path()
 
-        self.utility = self._calculate_utility()
+        self.utility: float = self._calculate_utility()
 
     def calculate_meeting_points(self):
         result = dict()

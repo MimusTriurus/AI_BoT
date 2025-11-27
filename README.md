@@ -80,29 +80,40 @@
 Проверить всех "безработных" транспортов.
 Попытаться "отобрать" пассажира у занятого транспорта, если это увеличит суммарную полезность команды.
 
-def make_unit(u_id, pos, unit_type: UnitType):
-    unit = {
-        ID_KEY: u_id,
-        POS_KEY: pos,
-        MOVE_RANGE_KEY: unit_data[unit_type][0],
-        DAMAGE_KEY: unit_data[unit_type][1],
-        ATTACK_RANGE_KEY: unit_data[unit_type][2],
-        HP_KEY: unit_data[unit_type][3],
-        VALUE_KEY: unit_data[unit_type][4],
-        CAPACITY_KEY: unit_data[unit_type][5],
-    }
-    return unit
-
-
+unit = {
+    ID_KEY: 'u_id',
+    POS_KEY: (0, 0),
+    MOVE_RANGE_KEY: 1,
+    DAMAGE_KEY: 1,
+    ATTACK_RANGE_KEY: 1,
+    HP_KEY: 4,
+    VALUE_KEY: 10,
+    # для транспортов
+    CAPACITY_KEY: 0,
+}
 class TransportPlan:
     def __init__(
             self,
             transport: dict,
             target: dict,
             passengers: List[dict],
-            path: List[Tuple[int, int]]
+            path: List[Tuple[int, int]],
+            grid: HexGrid,
+            pf: AStar
     ):
         self.transport: dict = transport
         self.target: dict = target
         self.passengers: List[dict] = passengers
-        self.path = path
+        self.path: Dict[str, Tuple[int, int]] = path
+        self.grid: HexGrid = grid
+        self.pf: AStar = pf
+        self.meeting_points: Dict[str, Tuple[int, int]] = self.calculate_meeting_points()
+        self.delivery_path: List[Tuple[int, int]] = self.calculate_delivery_path()
+        self.utility: float = self._calculate_utility()
+
+Есть список с вариантами TransportPlan для нескольких транспортов и целей с разными вариантами path\target\passengers и т.д.
+Необходимо сформировать оптимимальный список TransportPlan максимизирующий utility
+Контекст: пошаговая тактика на гексогональном поле. Транспортные операции.
+Аукцион задач
+Транспорт может содержать несколько юнитов (допустим 2). Несколько транспортов могут атаковать одну цель. Один и тот же юнит не может в итоге присутствовать в разных планах.
+Планов может быть больше 1000. Желательно реализовать не жадный алгоритм

@@ -3,6 +3,8 @@ from enum import Enum
 
 import pygame
 from typing import List, Dict, Tuple, Optional, Set
+
+from AI_BoT.common.helpers import find_attack_positions_for_unit, find_unload_positions, insert_after
 from visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
@@ -12,52 +14,10 @@ from w9_pathfinding.visualization import animate_grid
 from typing import List, Dict, Tuple, Optional, Set
 from dataclasses import dataclass
 from itertools import combinations, permutations
+from data_structures import *
 import heapq
 
-# Константы для ключей
-POS_KEY = 'pos'
-ID_KEY = 'id'
-TYPE_KEY = 'type'
-MOVE_RANGE_KEY = 'move_range'
-ATTACK_RANGE_KEY = 'attack_range'
-DAMAGE_KEY = 'damage'
-VALUE_KEY = 'value'
-HP_KEY = 'hp'
-CAPACITY_KEY = 'capacity'
 
-class UnitType(Enum):
-    TANK                = 0
-    LAND_TRANSPORT      = 1
-    ABSTRACT_TARGET     = 2
-    LAV                 = 4
-
-@dataclass
-class Squad:
-    units: List[Dict]
-    total_damage: int
-    unit_indices: List[int]
-
-
-@dataclass
-class PickupPlan:
-    """План погрузки одного юнита"""
-    unit_idx: int
-    unit_pos: Tuple[int, int]  # Начальная позиция юнита
-    meeting_point: Tuple[int, int]  # Позиция транспорта для погрузки
-    unit_meeting_point: Tuple[int, int] = None  # Позиция юнита при погрузке (соседняя с транспортом)
-    transport_cost: int = 0
-    unit_cost: int = 0
-
-
-@dataclass
-class TransportMission:
-    transport_idx: int
-    target: Dict
-    squad: Squad
-    pickup_sequence: List[PickupPlan]
-    unload_point: Tuple[int, int]
-    full_route: List[Tuple[int, int]]
-    efficiency: float
 
 
 class TransportPlanner:
@@ -150,7 +110,7 @@ class TransportPlanner:
                 continue
 
             # Поиск точки выгрузки (теперь для конкретных юнитов отряда)
-            unload_point = self._find_unload_position(target, squad, units)
+            unload_point = self._find_unload_position(target, squad)
 
             if not unload_point:
                 continue
@@ -190,21 +150,6 @@ class TransportPlanner:
                 best_efficiency = efficiency
 
         return best_mission
-    def _find_attack_positions_for_unit(self, target_pos: Tuple, weapon_range: int, move_range: int = 0) -> List[Tuple]:
-        visited = {target_pos}
-        frontier = [target_pos]
-        attack_range = weapon_range + move_range
-        for _ in range(attack_range):
-            next_frontier = []
-            for node in frontier:
-                for n, _ in self.grid.get_neighbors(node):
-                    if n not in visited and not self.grid.has_obstacle(n):
-                        visited.add(n)
-                        next_frontier.append(n)
-            frontier = next_frontier
-
-        visited.remove(target_pos)
-        return list(visited)
 
     def _estimate_meeting_cost(
             self,
@@ -246,7 +191,8 @@ class TransportPlanner:
         attack_range = unit[ATTACK_RANGE_KEY]
 
         # Находим все возможные точки выгрузки (откуда юнит может атаковать цель)
-        possible_unload_positions = self._find_attack_positions_for_unit(
+        possible_unload_positions = find_attack_positions_for_unit(
+            self.grid,
             target_pos,
             attack_range
         )
@@ -405,48 +351,12 @@ class TransportPlanner:
         return 9999
 
 # точка выгрузки должна определяться по юниту с наименьшим кол-ом ОП и ДА
-    def _find_unload_position(
-            self,
-            target: Dict,
-            squad: Squad,
-            units: List[Dict]
-    ) -> Optional[Tuple[int, int]]:
+    def _find_unload_position(self, target: Dict, squad: Squad) -> Optional[Tuple[int, int]]:
+        unload_common_positions = find_unload_positions(self.grid, target, squad.units)
+
         target_pos = target[POS_KEY]
 
-        # Находим все возможные позиции атаки для каждого юнита
-        unit_attack_positions = []
-        for unit in squad.units:
-            positions = self._find_attack_positions_for_unit(
-                target_pos,
-                unit[ATTACK_RANGE_KEY],
-                unit[MOVE_RANGE_KEY],
-            )
-            unit_attack_positions.append(set(positions))
-
-        # Находим пересечение - позиции, откуда ВСЕ юниты могут атаковать
-        if not unit_attack_positions:
-            return None
-
-        common_positions = unit_attack_positions[0]
-        for positions_set in unit_attack_positions[1:]:
-            common_positions = common_positions.intersection(positions_set)
-
-        if not common_positions:
-            # Если нет общих позиций, берем позицию для юнита с наименьшей дальностью
-            min_weapon_range = min(unit[ATTACK_RANGE_KEY] for unit in squad.units)
-            min_move_range = min(unit[MOVE_RANGE_KEY] for unit in squad.units)
-            min_attack_range = min(unit[ATTACK_RANGE_KEY] + unit[MOVE_RANGE_KEY] for unit in squad.units)
-            min_range_positions = []
-            for unit in squad.units:
-                attack_range = unit[ATTACK_RANGE_KEY] + unit[MOVE_RANGE_KEY]
-                if attack_range == min_attack_range:
-                    min_range_positions = self._find_attack_positions_for_unit(
-                        target_pos,
-                        min_weapon_range,
-                        min_move_range
-                    )
-                    break
-            common_positions = min_range_positions
+        common_positions = unload_common_positions
 
         if not common_positions:
             return None
@@ -823,13 +733,6 @@ class TransportPlanner:
 
         return missions
 
-def insert_after(lst, target, new_value):
-    try:
-        index = lst.index(target)
-        lst.insert(index + 1, new_value)
-    except ValueError:
-        print("!")
-
 # Пример использования
 def example_usage():
     weights = [
@@ -853,57 +756,29 @@ def example_usage():
     mapf = CBS(grid)
     planner = TransportPlanner(grid, mapf, pf, rt)
 
-    # m - move,
-    # w - weapon
-    # d - damage,
-    # r - weapon range,
-    # h - hp,
-    # v - value,
-    # c - capacity (transport)
-    unit_data = {
-        #                                m   d  r  h  v  c
-        UnitType.TANK:                  ( 2 ,  2,  1,  5,  2,  0 ),
-        UnitType.LAND_TRANSPORT:        ( 15,  0,  0,  3,  1,  2 ),
-        UnitType.ABSTRACT_TARGET:       ( 0 ,  0,  0,  3,  9,  0 ),
-        UnitType.LAV:                   ( 1 ,  1,  1,  4,  1,  0 ),
-    }
-
-    def make_unit(u_id, pos, unit_type: UnitType):
-        unit = {
-            ID_KEY: u_id,
-            POS_KEY: pos,
-            MOVE_RANGE_KEY: unit_data[unit_type]    [0],
-            DAMAGE_KEY: unit_data[unit_type]        [1],
-            ATTACK_RANGE_KEY: unit_data[unit_type]  [2],
-            HP_KEY: unit_data[unit_type]            [3],
-            VALUE_KEY: unit_data[unit_type]         [4],
-            CAPACITY_KEY: unit_data[unit_type]      [5],
-        }
-        return unit
-
     transports = [
         # transport #1 for group 1
-        make_unit(999, (0, 0), UnitType.LAND_TRANSPORT),
+        make_unit('999', (0, 0), UnitType.LAND_TRANSPORT),
         # transport #2 for group 2
-        make_unit(888, (0, 6), UnitType.LAND_TRANSPORT),
+        make_unit('888', (0, 6), UnitType.LAND_TRANSPORT),
     ]
 
     units = [
         # group 1
-        make_unit(0, (1, 0), UnitType.TANK),
-        make_unit(1, (3, 1), UnitType.TANK),
+        make_unit('0', (1, 0), UnitType.TANK),
+        make_unit('1', (3, 1), UnitType.TANK),
         # group 2
-        make_unit(2, (0, 5), UnitType.TANK),
-        make_unit(3, (3, 6), UnitType.TANK),
+        make_unit('2', (0, 5), UnitType.TANK),
+        make_unit('3', (3, 6), UnitType.TANK),
 
-        make_unit(4, (0, 1), UnitType.LAV),
+        make_unit('4', (0, 1), UnitType.LAV),
     ]
 
     targets = [
         # target #1 for group 1
-        make_unit(100, (6, 1), UnitType.ABSTRACT_TARGET),
+        make_unit('100', (6, 1), UnitType.ABSTRACT_TARGET),
         # target #2 for group 2
-        make_unit(101, (6, 5), UnitType.ABSTRACT_TARGET),
+        make_unit('101', (6, 5), UnitType.ABSTRACT_TARGET),
     ]
 
     missions = planner.plan_transport_operations(units, transports, targets)

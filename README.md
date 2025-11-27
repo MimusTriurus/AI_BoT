@@ -28,14 +28,14 @@
       - строил маршрут к этой позиции
 
     Дополнительно:
-        - юнит и транспорт могут двигаться навстречу друг другу для экономии ходов
-        - Транспорт\юнит не тратит очки передвижения на погрузку если они стоят вплонтую
+        - Транспорт двигается к юнитам для их погрузки. 
+        - При посадке и высадке юнита из транспорта, юнит тратит одно очко передвижения
     
-    Допустим У нас есть в распоряжении библиотека постоения путей (A* и различные варианты MAPF)
+    Допустим У нас есть в распоряжении библиотека постоения путей (A*) на гексогональном поле.
     
     Предложи алгоритм реализуцющий эту функцию. Пока в виде высокоуровнего описания
 
-
+##    MDVRP (Multi-Depot VRP)
 # 1
     Реализуй алгоритм на python использую следующие структуры данных
     # Гексагональное поле. -1 - непроходимый гекс
@@ -56,22 +56,53 @@
     targets = [
         {POS_KEY: (1, 5), VALUE_KEY: 0.1, HP_KEY: 3},
     ]
-    # объекс описывающий гексогональное поле
+    # объект описывающий гексогональное поле
     # примеры:
-    # - grid.calculate_cost([(0,0), (0,5)])
+    # - grid.calculate_cost(path)
     # - grid.get_neighbors((0,0), include_self=False) возвращает список Tuple((0,0), 1) где (0,0) координаты гекса, а 1 - стоимость передвижения (пока можешь игнорировать)
     # - grid.has_obstacle((0,0))
     grid = HexGrid(weights=weights, edge_collision=True, layout=HexLayout.odd_q)
-    # таблица резервирования ходов для mapf
-    rt = ReservationTable(grid)
-    # mapf solver - CBS 
-    # примеры:
-    # - paths = self.finder.mapf([(0,0)], [(0,5)], reservation_table=self.rt, max_length=max_unit_steps)
-    mapf = CBS(grid)
+
     # path solver - AStar
     # примеры
-    # - pf.find_path((0,1), (0,5))
+    # - path = pf.find_path((0,1), (0,5))
     pf = AStar(grid)
 
 # 3
 учти, чтл grid.get_neighbors() возвращает список Tuple((0,0), 1) где (0,0) координаты гекса, а 1 - стоимость передвижения (пока можешь игнорировать) 
+
+#  Допустим мы сформировали множество вариантов планов доставки юнитов к целям (TransportPlan).
+Теперь нам надо выполнить оптимизацию (аукцион)
+1. Насать метод который оценивает эфективность\полезность этого плана.
+Эффективность\полезность должна определяться исходя из того, какой урон будет нанесен цели, ценности цели и был ли оверхед по урону по цели
+2. Реализовать Iterative Improvement:
+Раздать задачи методом Аукциона (см. пункт 3).
+Проверить всех "безработных" транспортов.
+Попытаться "отобрать" пассажира у занятого транспорта, если это увеличит суммарную полезность команды.
+
+def make_unit(u_id, pos, unit_type: UnitType):
+    unit = {
+        ID_KEY: u_id,
+        POS_KEY: pos,
+        MOVE_RANGE_KEY: unit_data[unit_type][0],
+        DAMAGE_KEY: unit_data[unit_type][1],
+        ATTACK_RANGE_KEY: unit_data[unit_type][2],
+        HP_KEY: unit_data[unit_type][3],
+        VALUE_KEY: unit_data[unit_type][4],
+        CAPACITY_KEY: unit_data[unit_type][5],
+    }
+    return unit
+
+
+class TransportPlan:
+    def __init__(
+            self,
+            transport: dict,
+            target: dict,
+            passengers: List[dict],
+            path: List[Tuple[int, int]]
+    ):
+        self.transport: dict = transport
+        self.target: dict = target
+        self.passengers: List[dict] = passengers
+        self.path = path

@@ -1,5 +1,7 @@
 import pygame
 from typing import List, Dict, Tuple, Optional, Set
+
+from AI_BoT.data_structures import make_unit, UnitType
 from visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
@@ -81,7 +83,7 @@ class UnitAssignmentSolver:
                 )
 
                 for attack_pos in attack_positions:
-                    path = self._find_path(unit['start'], attack_pos, unit['move_range'])
+                    path = self._find_path(unit[POS_KEY], attack_pos, unit['move_range'])
 
                     if path:
                         cost = self.grid.calculate_cost(path)
@@ -169,7 +171,7 @@ class UnitAssignmentSolver:
                     if attack_pos in solution.final_positions:
                         continue
                     path = self._find_path_with_reservation(
-                        unit['start'],
+                        unit[POS_KEY],
                         attack_pos,
                         unit['move_range']
                     )
@@ -296,7 +298,7 @@ class UnitAssignmentSolver:
     def _handle_blocking_units(self, units: List[Dict], solution: Solution) -> Solution:
         for u_idx in solution.unused_units:
             unit = units[u_idx]
-            current_pos = unit['start']
+            current_pos = unit[POS_KEY]
 
             is_blocking, blocked_units = self._is_position_blocking(current_pos, solution.paths)
 
@@ -398,7 +400,6 @@ if __name__ == "__main__":
     max_move_range = 7
     min_move_range = 3
 
-    START_KEY = 'start'
     MOVE_RANGE_KEY = 'move_range'
     ATTACK_RANGE_KEY = 'attack_range'
     DAMAGE_KEY = 'damage'
@@ -408,23 +409,23 @@ if __name__ == "__main__":
 
     units = [
         # group #1
-        {START_KEY: (0, 0), MOVE_RANGE_KEY: max_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},  # 1
-        {START_KEY: (1, 1), MOVE_RANGE_KEY: max_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1}, # 0
-        {START_KEY: (2, 4), MOVE_RANGE_KEY: max_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1}, # 2
-        {START_KEY: (3, 0), MOVE_RANGE_KEY: max_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1}, # 3
+        make_unit('0', (0, 0), UnitType.TANK),
+        make_unit('1', (1, 1), UnitType.TANK),
+        make_unit('2', (2, 4), UnitType.TANK),
+        make_unit('3', (3, 0), UnitType.TANK),
         # blockers for group #1
-        {START_KEY: (1, 2), MOVE_RANGE_KEY: min_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1}, # 4 -
+        make_unit('4', (1, 2), UnitType.TANK),
         # group #2
-        {START_KEY: (4, 4), MOVE_RANGE_KEY: max_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
+        make_unit('5', (4, 4), UnitType.TANK),
         #{START_KEY: (5, 0), MOVE_RANGE_KEY: max_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1}, # 6
-        {START_KEY: (6, 1), MOVE_RANGE_KEY: max_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1}, # 5 -
+        make_unit('6', (6, 1), UnitType.TANK),
         # blockers for group #2
-        {START_KEY: (5, 2), MOVE_RANGE_KEY: min_move_range, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1}, # 7 -
+        make_unit('7', (5, 2), UnitType.TANK),
     ]
 
     targets = [
-        {POS_KEY: (1, 5), VALUE_KEY: 0.1, HP_KEY: 3},
-        {POS_KEY: (6, 6), VALUE_KEY: 10.2, HP_KEY: 3},
+        make_unit('100', (1, 5), UnitType.ABSTRACT_TARGET),
+        make_unit('101', (6, 6), UnitType.ABSTRACT_TARGET),
     ]
 
     grid = HexGrid(weights=weights, edge_collision=True, layout=HexLayout.odd_q)
@@ -445,7 +446,7 @@ if __name__ == "__main__":
     agents = []
     for u_idx, path in paths.items():
         agent = {
-            'start': units[u_idx]['start'],
+            POS_KEY: units[u_idx][POS_KEY],
             'goal': path[-1],
             'path': path,
         }

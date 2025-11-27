@@ -31,7 +31,7 @@ class HexVisualizer:
 
         return x, y
 
-    def __init__(self, grid, width=1200, height=900):
+    def __init__(self, grid, width=1920, height=1270):
         pygame.init()
         self.screen = pygame.display.set_mode((width, height))
         pygame.display.set_caption("Hex Tactical Visualization")
@@ -41,7 +41,7 @@ class HexVisualizer:
         self.width = width
         self.height = height
 
-        self.hex_size = 40
+        self.hex_size = 30
         self.hex_width = self.hex_size * 2
         self.hex_height = math.sqrt(3) * self.hex_size
 
@@ -57,6 +57,7 @@ class HexVisualizer:
             'hex_highlight': (80, 80, 120),
             'unit': (100, 150, 255),
             'unit_selected': (150, 200, 255),
+            'unit_transport': 'orange',
             'target': (255, 80, 80),
             'target_damaged': (200, 60, 60),
             'target_destroyed': (255, 255, 255),
@@ -141,17 +142,18 @@ class HexVisualizer:
 
     def draw_unit(self, pos: Tuple[float, float], unit_data: Dict, animated_pos=None):
         center = animated_pos if animated_pos else self.hex_to_pixel(pos)
-
+        unit_id = str(unit_data.get('id', '?'))
         is_selected = unit_data.get('selected', False)
         color = self.COLORS['unit_selected'] if is_selected else self.COLORS['unit']
 
-        pygame.draw.circle(self.screen, color,
-                           (int(center[0]), int(center[1])), 15)
-        pygame.draw.circle(self.screen, self.COLORS['hex_border'],
-                           (int(center[0]), int(center[1])), 15, 2)
+        color = self.COLORS['unit_transport'] if 'LT_' in unit_id else self.COLORS['unit']
 
-        text = self.font_small.render(str(unit_data.get('id', '?')),
-                                      True, (255, 255, 255))
+        pygame.draw.circle(self.screen, color,
+                           (int(center[0]), int(center[1])), 20)
+        pygame.draw.circle(self.screen, self.COLORS['hex_border'],
+                           (int(center[0]), int(center[1])), 20, 2)
+
+        text = self.font_small.render(unit_id,True, (255, 255, 255))
         text_rect = text.get_rect(center=center)
         self.screen.blit(text, text_rect)
 
@@ -167,7 +169,7 @@ class HexVisualizer:
         if target_destroyed:
             color = self.COLORS['target_destroyed']
 
-        size = 20
+        size = 30
         rect = pygame.Rect(center[0] - size / 2, center[1] - size / 2, size, size)
         pygame.draw.rect(self.screen, color, rect)
         pygame.draw.rect(self.screen, self.COLORS['hex_border'], rect, 2)
@@ -184,6 +186,11 @@ class HexVisualizer:
         hp_width = hp_bar_width * (current_hp / target_data['hp'])
         pygame.draw.rect(self.screen, self.COLORS['hp_bar'],
                          (hp_bar_x, hp_bar_y, hp_width, hp_bar_height))
+
+        text = self.font_small.render(str(target_data.get('id', '?')),
+                                      True, (255, 255, 255))
+        text_rect = text.get_rect(center=center)
+        self.screen.blit(text, text_rect)
 
         hp_text = self.font_small.render(f"{int(current_hp)}/{target_data['hp']}",
                                          True, self.COLORS['text'])
@@ -364,7 +371,8 @@ class HexVisualizer:
                 self.draw_grid()
 
             for u_id, path in solution['paths'].items():
-                color = 'red' if u_id > 100 else 'green'
+                u_id = str(u_id)
+                color = 'red' if 'LT' in u_id else 'green'
                 self.draw_path(path, color)
 
             for target in targets:

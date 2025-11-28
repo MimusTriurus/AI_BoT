@@ -7,10 +7,13 @@ import pygame
 from AI_BoT.common.helpers import find_unload_positions, insert_after
 from AI_BoT.data_structures import *
 from AI_BoT.clustering import *
+from AI_BoT.transport_plan_optimization import TransportPlanOptimizer
 from AI_BoT.visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
+
+from best_transport_plans import *
 
 
 def generate_transport_loads(cluster_units: Dict[int, List[Tuple[int, int]]], transport_capacity: int):
@@ -185,7 +188,7 @@ def solve_transport_mission(
                     sequence_removed_obstacles.append(target_unit)
 
                     if current_accumulated_cost >= transport_mp:
-                        is_sequence_valid = False;
+                        is_sequence_valid = False
                         break
 
                     neighbors = grid.get_neighbors(target_unit, include_self=False)
@@ -270,195 +273,6 @@ def solve_transport_mission(
             if grid.has_obstacle(obs):
                 grid.remove_obstacle(obs)
 
-def run_auction(all_possible_plans: List[TransportPlan]) -> Tuple[List[TransportPlan], Set[str]]:
-    """
-    Возвращает список принятых планов и набор ID "безработных" транспортов.
-    """
-    # 1. Сортируем от лучшего к худшему
-    sorted_plans = sorted(all_possible_plans, key=lambda p: p.utility, reverse=True)
-
-    accepted_plans = []
-
-    # Реестры занятости
-    busy_transports: Set[str] = set()
-    busy_passengers: Set[str] = set()
-    dead_targets: Set[str] = set()  # Чтобы не атаковать убитого дважды (опционально)
-
-    for plan in sorted_plans:
-        t_id = plan.transport[ID_KEY]
-        p_ids = [p[ID_KEY] for p in plan.passengers]
-        target_id = plan.target[ID_KEY]
-
-        # ПРОВЕРКИ КОНФЛИКТОВ
-        if t_id in busy_transports:
-            continue  # Транспорт занят
-        if any(pid in busy_passengers for pid in p_ids):
-            continue  # Кто-то из пассажиров уже уехал с другим
-        if target_id in dead_targets:
-            # Тут можно сделать сложнее: проверить HP, но для простоты - one shot
-            continue
-
-        # ПРИНЯТИЕ ПЛАНА
-        accepted_plans.append(plan)
-
-        # Блокировка ресурсов
-        busy_transports.add(t_id)
-        for pid in p_ids:
-            busy_passengers.add(pid)
-
-        # Если цель убита, помечаем её (упрощение)
-        total_dmg = sum(p[DAMAGE_KEY] for p in plan.passengers)
-        if total_dmg >= plan.target[HP_KEY]:
-            dead_targets.add(target_id)
-
-    return accepted_plans, busy_transports
-
-def iterative_improvement(
-        current_accepted_plans: List[TransportPlan],
-        all_possible_plans: List[TransportPlan]
-) -> List[TransportPlan]:
-    # Преобразуем список планов в словарь для быстрого поиска: TransportID -> Plan
-    assignment_map = {p.transport[ID_KEY]: p for p in current_accepted_plans}
-
-    # Нам также нужно быстро знать, кто везет конкретного пассажира
-    # PassengerID -> (TransportID, Plan)
-    passenger_assignment = {}
-    for plan in current_accepted_plans:
-        for pass_unit in plan.passengers:
-            passenger_assignment[pass_unit[ID_KEY]] = plan
-
-    # Ищем "безработных" транспортов
-    all_transport_ids = set(p.transport[ID_KEY] for p in all_possible_plans)
-    busy_transport_ids = set(assignment_map.keys())
-    idle_transports = list(all_transport_ids - busy_transport_ids)
-
-    improved = True
-
-    # Крутим цикл пока есть улучшения (или ограничиваем числом итераций)
-    while improved and idle_transports:
-        improved = False
-
-        # Сортируем безработных, чтобы начать с тех, кто потенциально может дать макс импакт?
-        # Для простоты берем первого
-        candidate_t_id = idle_transports.pop(0)
-
-        # Ищем все планы, которые мог бы выполнить этот безработный транспорт
-        candidate_options = [p for p in all_possible_plans if p.transport[ID_KEY] == candidate_t_id]
-        # Сортируем лучшие варианты для него
-        candidate_options.sort(key=lambda x: x.utility, reverse=True)
-
-        for new_proposal in candidate_options:
-            # Проверяем, кого нам нужно "обокрасть", чтобы выполнить этот план
-            required_passengers = [p[ID_KEY] for p in new_proposal.passengers]
-
-            # Находим текущие планы, владеющие этими пассажирами
-            conflicting_plans = set()
-            possible_steal = True
-
-            for pid in required_passengers:
-                if pid not in passenger_assignment:
-                    # Пассажир свободен (странно, почему его не взяли на аукционе?
-                    # возможно транспорт был занят другим). Берем!
-                    continue
-
-                owner_plan = passenger_assignment[pid]
-                conflicting_plans.add(owner_plan)
-
-            # ОЦЕНКА ВЫГОДЫ (The Swap Logic)
-            # Gain: Полезность нового плана
-            # Loss: Сумма полезностей планов, которые мы разрушим
-
-            gain = new_proposal.utility
-            loss = sum(cp.utility for cp in conflicting_plans)
-
-            # Если выигрыш существенен (например > 5% чтобы избежать бесконечных циклов)
-            if gain > loss * 1.05:
-                # ВЫПОЛНЯЕМ ОБМЕН
-
-                # 1. Отменяем старые планы
-                for old_plan in conflicting_plans:
-                    del assignment_map[old_plan.transport[ID_KEY]]
-                    # Освобождаем пассажиров старого плана (из реестра)
-                    for p in old_plan.passengers:
-                        if p[ID_KEY] in passenger_assignment:
-                            del passenger_assignment[p[ID_KEY]]
-
-                    # Транспорт старого плана становится безработным
-                    idle_transports.append(old_plan.transport[ID_KEY])
-
-                # 2. Назначаем новый план
-                assignment_map[candidate_t_id] = new_proposal
-                for p in new_proposal.passengers:
-                    passenger_assignment[p[ID_KEY]] = new_proposal
-
-                # Мы нашли улучшение для этого транспорта, выходим из цикла опций
-                improved = True
-                break
-
-    return list(assignment_map.values())
-
-@dataclass
-class State:
-    accepted_plans: List[TransportPlan]
-    used_transports: Set[int]
-    used_passengers: Set[int]
-    used_targets: Set[int]
-    total_utility: float
-
-
-def can_add(plan: TransportPlan, state: State) -> bool:
-    if plan.transport[ID_KEY] in state.used_transports:
-        return False
-    if any(p[ID_KEY] in state.used_passengers for p in plan.passengers):
-        return False
-    if plan.target[ID_KEY] in state.used_targets:
-        return False
-    return True
-
-def apply_plan(plan: TransportPlan, state: State) -> State:
-    new = State(
-        accepted_plans=state.accepted_plans + [plan],
-        used_transports = state.used_transports | {plan.transport[ID_KEY]},
-        used_passengers = state.used_passengers | {p[ID_KEY] for p in plan.passengers},
-        used_targets = state.used_targets | {plan.target[ID_KEY]},
-        total_utility = state.total_utility + plan.utility
-    )
-    return new
-
-def beam_search_transport_plans(all_plans: List[TransportPlan], beam_size: int = 5):
-    # 1. Сортируем планы от лучшего к худшему
-    all_plans = sorted(all_plans, key=lambda p: p.utility, reverse=True)
-
-    # 2. Начальное состояние
-    initial = State(
-        accepted_plans=[],
-        used_transports=set(),
-        used_passengers=set(),
-        used_targets=set(),
-        total_utility=0.0
-    )
-
-    beam = [initial]  # список лучших состояний текущей итерации
-
-    for plan in all_plans:
-        candidates = []
-
-        # пробуем добавить план в каждое состояние бима
-        for state in beam:
-            # состояние "без добавления" тоже должно быть доступно
-            candidates.append(state)
-
-            if can_add(plan, state):
-                new_state = apply_plan(plan, state)
-                candidates.append(new_state)
-
-        # оставляем только top-K
-        candidates.sort(key=lambda s: s.total_utility, reverse=True)
-        beam = candidates[:beam_size]
-
-    # Лучшее состояние = первое
-    return beam[0]
-
 if __name__ == '__main__':
     map_size = 22
     map_data = [[1] * map_size] * map_size
@@ -473,8 +287,8 @@ if __name__ == '__main__':
     my_units_storage.add_unit('T_3', (1, 2), UnitType.TANK)
     my_units_storage.add_unit('T_4', (1, 6), UnitType.TANK)
 
-    #my_units_storage.add_unit('T_5', (6, 6), UnitType.TANK)
-    #my_units_storage.add_unit('T_6', (5, 6), UnitType.TANK)
+    my_units_storage.add_unit('T_5', (6, 6), UnitType.TANK)
+    my_units_storage.add_unit('T_6', (5, 6), UnitType.TANK)
 
     units_clusters = my_units_storage.get_clusters(grid)
 
@@ -482,20 +296,13 @@ if __name__ == '__main__':
     en_units_storage = UnitsStorage()
     en_units_storage.add_unit('#1', (5, 1), UnitType.ABSTRACT_TARGET)
     en_units_storage.add_unit('#2', (5, 4), UnitType.ABSTRACT_TARGET)
-    #en_units_storage.add_unit('#3', (10, 9), UnitType.ABSTRACT_TARGET)
+    en_units_storage.add_unit('#3', (10, 9), UnitType.ABSTRACT_TARGET)
 
     # === TRANSPORTS ===
     transport_storage = UnitsStorage()
     transport_storage.add_unit('LT_1', (1, 1), UnitType.LAND_TRANSPORT)
     transport_storage.add_unit('LT_2', (1, 3), UnitType.LAND_TRANSPORT)
-    #transport_storage.add_unit('LT_3', (6, 9), UnitType.LAND_TRANSPORT)
-
-    # UNUSED. результат k-mean не детерминирован
-    units_clusters_ = {
-        0: [(0, 0), (1, 0), (1, 2), (1, 6)],
-        #1: [(1, 5)],
-        2: [(6, 6), (5, 6)]
-    }
+    transport_storage.add_unit('LT_3', (6, 9), UnitType.LAND_TRANSPORT)
 
     # емкость транспорта
     transport_capacity = transport_storage.get_units()[0][CAPACITY_KEY]
@@ -531,17 +338,20 @@ if __name__ == '__main__':
                                 grid=grid,
                                 pf=pf
                             )
-                            transport_plans.append(tp)
+                            if tp.utility > 20:
+                                transport_plans.append(tp)
 
-    #result = beam_search_transport_plans(transport_plans)
+    optimizer = TransportPlanOptimizer(transport_plans)
+    actual_plans, total_utility = optimizer.optimize(method='branch_and_bound', n_workers=4)
+    #actual_plans, total_utility = optimizer.optimize(method='hybrid', n_workers=1)
+    #actual_plans, total_utility = optimizer.optimize(method='auction')
 
+    print(f'\n=================')
+    for plan in actual_plans:
+        print(str(plan))
+    print(f'=== Total utility: {total_utility} ===')
 
-    accepted_plans, busy_transports = run_auction(transport_plans)
-
-    actual_plans = iterative_improvement(accepted_plans, transport_plans)
-    #actual_plans = accepted_plans
-
-#   визуализация. Говнокод
+# region   визуализация. Говнокод
     visualizer = HexVisualizer(grid)
     units_paths = dict()
     for plan in actual_plans:
@@ -598,11 +408,9 @@ if __name__ == '__main__':
                 path = path + path_tail
                 units_paths[u_id] = path
 
-        print(str(plan))
-
     solution = {
         'assignments': [],
-        'paths': units_paths
+        'paths': dict()#units_paths
     }
 
     units = list(my_units_storage.get_units())
@@ -620,5 +428,5 @@ if __name__ == '__main__':
             break
 
     pygame.quit()
-
+# endregion
     print('End!')

@@ -209,8 +209,12 @@ class TransportPlan:
             else:
                 damage_added_by_transport += dmg
 
+        # А нужно ли нам грузить юнит если он может атаковать цель и сам?
+        if damage_available_on_foot > 0.0:
+            return 0
+
         if transport_path_cost < 0.1 and damage_available_on_foot >= target_hp:
-            return 0.0
+            return 0
         # --- ЛОГИКА ОЦЕНКИ ---
 
         # 1. Взвешиваем урон (Marginal Utility)

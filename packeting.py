@@ -4,11 +4,12 @@ from itertools import permutations
 
 import pygame
 
-from AI_BoT.common.helpers import find_unload_positions, insert_after
-from AI_BoT.data_structures import *
-from AI_BoT.clustering import *
-from AI_BoT.transport_plan_optimization import TransportPlanOptimizer
-from AI_BoT.visualizer import HexVisualizer
+from common.helpers import find_unload_positions, insert_after
+from data_structures import *
+from clustering import *
+from examples.genetic_algo import optimize_transport_plans
+from examples.transport_plan_optimization import TransportPlanOptimizer
+from visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
@@ -342,14 +343,17 @@ if __name__ == '__main__':
                                 transport_plans.append(tp)
 
     optimizer = TransportPlanOptimizer(transport_plans)
-    actual_plans, total_utility = optimizer.optimize(method='branch_and_bound', n_workers=4)
+
+    actual_plans = optimize_transport_plans(transport_plans)
+
+    #actual_plans, total_utility = optimizer.optimize(method='branch_and_bound', n_workers=4)
     #actual_plans, total_utility = optimizer.optimize(method='hybrid', n_workers=1)
     #actual_plans, total_utility = optimizer.optimize(method='auction')
 
     print(f'\n=================')
     for plan in actual_plans:
         print(str(plan))
-    print(f'=== Total utility: {total_utility} ===')
+    #print(f'=== Total utility: {total_utility} ===')
 
 # region   визуализация. Говнокод
     visualizer = HexVisualizer(grid)
@@ -410,7 +414,8 @@ if __name__ == '__main__':
 
     solution = {
         'assignments': [],
-        'paths': dict()#units_paths
+        #'paths': dict()
+        'paths':  units_paths
     }
 
     units = list(my_units_storage.get_units())

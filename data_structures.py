@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from math import log2
 from typing import List, Dict, Tuple, Optional, Set
-from AI_BoT.clustering import cluster_by_proximity, kmeans_hex, soft_clustering
+from clustering import cluster_by_proximity, kmeans_hex, soft_clustering
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.envs import HexGrid
 

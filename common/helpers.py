@@ -1,6 +1,6 @@
 from typing import List, Tuple, Dict, Optional
 
-from AI_BoT.data_structures import *
+from examples.data_structures import *
 from w9_pathfinding.envs import HexGrid
 
 def find_attack_positions_for_unit(grid: HexGrid, target_pos: Tuple, weapon_range: int, move_range: int = 0) -> List[Tuple]:

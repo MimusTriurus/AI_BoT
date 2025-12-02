@@ -4,17 +4,18 @@ from itertools import permutations
 
 import pygame
 
-from common.helpers import find_unload_positions, insert_after
+from AI_BoT.data_structures import UnitType
+from AI_BoT.genetic_algo import optimize_transport_plans
+from AI_BoT.transport_plan_optimization import TransportPlanOptimizer
+from common.helpers import find_unload_positions, insert_after, find_attack_positions_for_unit
 from data_structures import *
 from clustering import *
-from examples.genetic_algo import optimize_transport_plans
-from examples.transport_plan_optimization import TransportPlanOptimizer
 from visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
 
-from best_transport_plans import *
+UTILITY_THRESHOLD = 5
 
 
 def generate_transport_loads(cluster_units: Dict[int, List[Tuple[int, int]]], transport_capacity: int):
@@ -146,7 +147,7 @@ def solve_transport_mission(
 
         # 1. Добавляем ПАССАЖИРОВ (своих)
         for p in passengers:
-            if not grid.has_obstacle(p):
+            if not grid.has_obstacle(p) and p != transport_pos:
                 grid.add_obstacle(p)
                 mission_obstacles.append(p)
 
@@ -184,6 +185,9 @@ def solve_transport_mission(
             try:
                 # --- Этап А: Сбор пассажиров ---
                 for target_unit in sequence:
+                    if transport_pos == target_unit:
+                        full_path_hexes.append(transport_pos)
+                        continue
                     # Временно "подбираем" пассажира -> клетка освобождается
                     grid.remove_obstacle(target_unit)
                     sequence_removed_obstacles.append(target_unit)
@@ -218,7 +222,7 @@ def solve_transport_mission(
                                 found_entry_point = True
 
                     if not found_entry_point:
-                        is_sequence_valid = False;
+                        is_sequence_valid = False
                         break
 
                     current_accumulated_cost += best_leg_cost
@@ -283,36 +287,72 @@ if __name__ == '__main__':
     # === MY UNITS ===
     my_units_storage = UnitsStorage()
     my_units_storage.add_unit('T_1', (0, 0), UnitType.TANK)
-    my_units_storage.add_unit('T_2', (1, 0), UnitType.TANK)
+    my_units_storage.add_unit('SC_1', (1, 0), UnitType.SCORCHER)
 
-    my_units_storage.add_unit('T_3', (1, 2), UnitType.TANK)
-    my_units_storage.add_unit('T_4', (1, 6), UnitType.TANK)
+    my_units_storage.add_unit('T_2', (1, 2), UnitType.TANK)
+    my_units_storage.add_unit('T_3', (1, 6), UnitType.TANK)
 
-    my_units_storage.add_unit('T_5', (6, 6), UnitType.TANK)
-    my_units_storage.add_unit('T_6', (5, 6), UnitType.TANK)
+    my_units_storage.add_unit('T_4', (6, 7), UnitType.TANK)
+    my_units_storage.add_unit('SC_2', (5, 7), UnitType.SCORCHER)
 
     units_clusters = my_units_storage.get_clusters(grid)
 
     # === ENEMY UNITS ===
     en_units_storage = UnitsStorage()
     en_units_storage.add_unit('#1', (5, 1), UnitType.ABSTRACT_TARGET)
-    en_units_storage.add_unit('#2', (5, 4), UnitType.ABSTRACT_TARGET)
+    en_units_storage.add_unit('#2', (5, 4), UnitType.ABSTRACT_TARGET, new_hp=6)
     en_units_storage.add_unit('#3', (10, 9), UnitType.ABSTRACT_TARGET)
 
     # === TRANSPORTS ===
     transport_storage = UnitsStorage()
     transport_storage.add_unit('LT_1', (1, 1), UnitType.LAND_TRANSPORT)
     transport_storage.add_unit('LT_2', (1, 3), UnitType.LAND_TRANSPORT)
-    transport_storage.add_unit('LT_3', (6, 9), UnitType.LAND_TRANSPORT)
+    #transport_storage.add_unit('LT_3', (6, 9), UnitType.LAND_TRANSPORT)
 
     # емкость транспорта
-    transport_capacity = transport_storage.get_units()[0][CAPACITY_KEY]
+    transport_capacity = unit_data[UnitType.LAND_TRANSPORT][5]
     # очки передвижения транспорта
-    transport_mp = transport_storage.get_units()[0][MOVE_RANGE_KEY]
+    transport_mp = unit_data[UnitType.LAND_TRANSPORT][0]
 
     transport_loads = generate_transport_loads(units_clusters, transport_capacity)
 
     transport_plans: List[TransportPlan] = []
+
+    for unit in my_units_storage.get_units():
+        unit_pos = unit[POS_KEY]
+        for target in en_units_storage.get_units():
+            positions_2_attack = find_attack_positions_for_unit(
+                grid,
+                target[POS_KEY],
+                unit[ATTACK_RANGE_KEY],
+                0
+            )
+            for position_2_attack in positions_2_attack:
+                best_order, cost, path = solve_transport_mission(
+                    transport_pos=unit_pos,
+                    transport_mp=unit[MOVE_RANGE_KEY],
+                    passengers=[unit_pos],
+                    drop_zone=position_2_attack,
+                    enemy_positions=en_units_storage.get_units_pos(),
+                    grid=grid,
+                    pf=pf
+                )
+                if best_order:
+                    unload_map = {
+                        unit[ID_KEY]: position_2_attack
+                    }
+
+                    tp = TransportPlan(
+                        transport=unit,
+                        target=target,
+                        passengers=[unit],
+                        path=path,
+                        unload_map=unload_map,
+                        grid=grid,
+                        pf=pf
+                    )
+                    if tp.utility > 0:
+                        transport_plans.append(tp)
 
     for transport_pos in transport_storage.get_units_pos():
         for target in en_units_storage.get_units():
@@ -331,24 +371,36 @@ if __name__ == '__main__':
                             pf=pf
                         )
                         if best_order:
-                            tp = TransportPlan(
-                                transport=transport_storage.get_unit(transport_pos),
-                                target=target,
-                                passengers=my_units_storage.get_units(best_order),
-                                path=path,
+                            drop_zone = path[-1]
+                            passengers = my_units_storage.get_units(best_order)
+                            unload_map, total_damage = TransportPlan.solve_best_unload_configuration(
+                                drop_zone=position_2_unload,
+                                target_pos=target[POS_KEY],
+                                passengers=passengers,
+                                enemy_positions=en_units_storage.get_units_pos(),
+                                other_obstacles=[],
                                 grid=grid,
                                 pf=pf
                             )
-                            if tp.utility > 20:
+                            tp = TransportPlan(
+                                transport=transport_storage.get_unit(transport_pos),
+                                target=target,
+                                passengers=passengers,
+                                path=path,
+                                unload_map=unload_map,
+                                grid=grid,
+                                pf=pf
+                            )
+                            if tp.utility > UTILITY_THRESHOLD:
                                 transport_plans.append(tp)
-
     optimizer = TransportPlanOptimizer(transport_plans)
 
-    actual_plans = optimize_transport_plans(transport_plans)
+    #actual_plans = optimize_transport_plans(transport_plans)
 
-    #actual_plans, total_utility = optimizer.optimize(method='branch_and_bound', n_workers=4)
-    #actual_plans, total_utility = optimizer.optimize(method='hybrid', n_workers=1)
-    #actual_plans, total_utility = optimizer.optimize(method='auction')
+    # actual_plans, total_utility = optimizer.optimize(method='auction')
+    # auction + local search
+    actual_plans, total_utility = optimizer.optimize_hybrid()
+    #actual_plans, total_utility = optimizer.optimize_branch_and_bound(actual_plans, total_utility)
 
     print(f'\n=================')
     for plan in actual_plans:
@@ -409,7 +461,8 @@ if __name__ == '__main__':
             result = next((item for item in plan.passengers if item[ID_KEY] == u_id), None)
             if result:
                 path_tail = transport_route[len(path):]
-                path = path + path_tail
+                path_2_target = [plan.unload_map[u_id]]
+                path = path + path_tail + path_2_target
                 units_paths[u_id] = path
 
     solution = {
@@ -417,6 +470,20 @@ if __name__ == '__main__':
         #'paths': dict()
         'paths':  units_paths
     }
+
+    assignment = {}
+    for plan in actual_plans:
+        target = plan.target
+        t_id = target[ID_KEY]
+        t_idx = next(i for i, obj in enumerate(en_units_storage.get_units()) if obj[ID_KEY] == t_id)
+
+        for passenger in plan.passengers:
+            u_id = passenger[ID_KEY]
+            u_idx = next(i for i, obj in enumerate(my_units_storage.get_units()) if obj[ID_KEY] == u_id)
+            solution['assignments'].append({
+                "unit_idx": u_id,
+                "target_idx": t_idx
+            })
 
     units = list(my_units_storage.get_units())
     units.extend(transport_storage.get_units())

@@ -21,7 +21,8 @@ class UnitType(Enum):
     TANK                = 0
     LAND_TRANSPORT      = 1
     ABSTRACT_TARGET     = 2
-    LAV                 = 4
+    LAV                 = 3
+    SCORCHER            = 4
 
 @dataclass
 class Squad:
@@ -61,9 +62,10 @@ class TransportMission:
 unit_data = {
     #                                 m    d   r   h   v   c
     UnitType.TANK:                  ( 2 ,  2,  1,  5,  2,  0 ),
-    UnitType.LAND_TRANSPORT:        ( 7,   0,  0,  3,  1,  2 ),
+    UnitType.LAND_TRANSPORT:        ( 5,   0,  0,  3,  1,  2 ),
     UnitType.ABSTRACT_TARGET:       ( 0 ,  0,  0,  4,  9,  0 ),
     UnitType.LAV:                   ( 1 ,  1,  1,  4,  1,  0 ),
+    UnitType.SCORCHER:              ( 1 ,  2,  2,  4,  2,  0 ),
 }
 
 
@@ -84,8 +86,19 @@ class UnitsStorage:
     def __init__(self):
         self.units = dict()
 
-    def add_unit(self, u_id: str, pos: Tuple, unit_type: UnitType) -> dict:
+    def add_unit(
+            self,
+            u_id: str,
+            pos: Tuple,
+            unit_type: UnitType,
+            new_hp = None,
+            new_value = None
+    ) -> dict:
         unit = make_unit(u_id, pos, unit_type)
+        if new_hp:
+            unit[HP_KEY] = new_hp
+        if new_value:
+            unit[VALUE_KEY] = new_value
         self.units[pos] = unit
         return unit
 
@@ -129,18 +142,32 @@ class TransportPlan:
             target: dict,
             passengers: List[dict],
             path: List[Tuple[int, int]],
+            unload_map: Dict[str, Tuple[int, int]],
             grid: HexGrid,
             pf: AStar
     ):
         self.transport: dict = transport
         self.target: dict = target
         self.passengers: List[dict] = passengers
-        self.path: Dict[str, Tuple[int, int]] = path
+        self.path: List[Tuple[int, int]] = path
+        # вариант разгрузки юнитов
+        self.unload_map = unload_map
         self.grid: HexGrid = grid
         self.pf: AStar = pf
 
+        # пока костыль - транспортируем сами себя
+        self.transit_ourself: bool = False
+        if len(self.passengers) == 1 and passengers[0][POS_KEY] == self.transport[POS_KEY]:
+            self.transit_ourself = True
+
         self.meeting_points: Dict[str, Tuple[int, int]] = self.calculate_meeting_points()
         self.delivery_path: List[Tuple[int, int]] = self.calculate_delivery_path()
+
+        self.occupied_hexes_set = set(unload_map.values())
+        if self.path:
+            self.occupied_hexes_set.add(self.path[-1])
+
+        self.actual_damage_contribution = self._calculate_actual_damage()
 
         self.utility: float = self._calculate_utility()
 
@@ -155,8 +182,33 @@ class TransportPlan:
 
     # путь до цели после загрузки
     def calculate_delivery_path(self) -> List[Tuple[int, int]]:
-        last_loading_idx = max(self.path.index(lp) for lp in self.meeting_points.values() if lp in self.path)
-        return self.path[last_loading_idx:]
+        try:
+            last_loading_idx = max(self.path.index(lp) for lp in self.meeting_points.values() if lp in self.path)
+            return self.path[last_loading_idx:]
+        except Exception as e:
+            return []
+
+    def _calculate_actual_damage(self) -> float:
+        """
+        Рассчитывает урон, который действительно будет нанесен, исходя из
+        оптимальной расстановки выгрузки (self.unload_map).
+        """
+        total_damage = 0.0
+        target_pos = self.target[POS_KEY]
+
+        for unit in self.passengers:
+            unit_id = unit[ID_KEY]
+            unload_pos = self.unload_map.get(unit_id)
+
+            if unload_pos:
+                path = self.pf.find_path(unload_pos, target_pos)
+                dist = self.grid.calculate_cost(path)
+
+                # Если юнит достает до цели с назначенной ему точки выгрузки
+                if dist <= unit[ATTACK_RANGE_KEY]:
+                    total_damage += unit[DAMAGE_KEY]
+
+        return total_damage
 
     def _calculate_utility(self) -> float:
         """
@@ -164,7 +216,6 @@ class TransportPlan:
         Учитывает: Урон, Ценность цели, Оверхед, Бонус за убийство,
         и главное - Marginal Utility (нужен ли вообще транспорт).
         """
-
         # 1. Стоимость пути транспорта (Очки Передвижения)
         # Используем метод сетки для точного расчета (учет дорог, болот и т.д.)
         transport_path_cost = self.grid.calculate_cost(self.delivery_path)
@@ -172,6 +223,8 @@ class TransportPlan:
         target_hp = self.target[HP_KEY]
         target_val = self.target[VALUE_KEY]
         target_pos = self.target[POS_KEY]
+
+        actual_damage = self.actual_damage_contribution
 
         total_potential_damage = 0
         damage_added_by_transport = 0  # Урон, который невозможен без транспорта
@@ -182,7 +235,6 @@ class TransportPlan:
         for unit in self.passengers:
             dmg = unit[DAMAGE_KEY]
             total_potential_damage += dmg
-
             # --- ПРОВЕРКА: МОЖЕТ ЛИ ЮНИТ ДОЙТИ САМ? ---
             # Используем AStar, чтобы проверить реальную проходимость.
             # Находим путь от юнита до цели.
@@ -203,14 +255,19 @@ class TransportPlan:
 
                 if adjusted_walk_cost <= unit[MOVE_RANGE_KEY]:
                     can_reach_on_foot = True
+            cost_path_2_target = self.grid.calculate_cost(self.pf.find_path(self.unload_map[unit[ID_KEY]], self.target[POS_KEY]))
+            is_unit_attacking = self.unload_map.get(unit[ID_KEY]) is not None and cost_path_2_target <= unit[ATTACK_RANGE_KEY]
+            if is_unit_attacking:
+                if can_reach_on_foot:
+                    damage_available_on_foot += dmg
+                else:
+                    damage_added_by_transport += dmg
 
-            if can_reach_on_foot:
-                damage_available_on_foot += dmg
-            else:
-                damage_added_by_transport += dmg
+        if actual_damage == 0.0:
+            return 0.0
 
         # А нужно ли нам грузить юнит если он может атаковать цель и сам?
-        if damage_available_on_foot > 0.0:
+        if damage_available_on_foot > 0.0 and not self.transit_ourself:
             return 0
 
         if transport_path_cost < 0.1 and damage_available_on_foot >= target_hp:
@@ -220,42 +277,34 @@ class TransportPlan:
         # 1. Взвешиваем урон (Marginal Utility)
         # Урон, требующий транспорта -> Вес 1.0 (Высокий приоритет)
         # Урон, доступный пешком -> Вес 0.1 (Низкий приоритет, используем транспорт только если некуда девать)
-        weighted_damage = (damage_added_by_transport * 1.0) + (damage_available_on_foot * 0.1)
+        weighted_damage = (damage_added_by_transport * 1) + (damage_available_on_foot * 0.1)
 
-        # Коэффициент качества плана (0.0 - 1.0). Насколько этот план оправдывает использование машины?
-        if total_potential_damage > 0:
-            transport_relevance = weighted_damage / total_potential_damage
-        else:
-            transport_relevance = 0
+        # Коэффициент качества плана (0.0 - 1.0)
+        # Используем actual_damage как нормализатор для весов.
+        transport_relevance = weighted_damage / actual_damage
 
         # 2. Эффективность по здоровью (Capping)
-        # Мы не можем получить пользы больше, чем у цели есть здоровья.
-        real_damage_dealt = min(total_potential_damage, target_hp)
+        real_damage_dealt = min(actual_damage, target_hp)  # <--- ИСПОЛЬЗУЕМ actual_damage
 
         # Применяем релевантность транспорта к нанесенному урону
         utility_score_base = real_damage_dealt * transport_relevance
 
         # 3. Бонус за убийство (Kill Bonus)
         kill_multiplier = 1.0
-        if total_potential_damage >= target_hp:
-            # Если убиваем...
+        if actual_damage >= target_hp:  # <--- ИСПОЛЬЗУЕМ actual_damage
             if damage_available_on_foot >= target_hp:
-                # ...но могли убить и пешком. Небольшой бонус за скорость/гарантию.
                 kill_multiplier = 1.1
             else:
-                # ...и без транспорта убийство было бы невозможно. Огромный бонус.
                 kill_multiplier = 2.0
 
         # 4. Штраф за Оверхед (Waste Penalty)
-        # Если у цели 1 HP, а мы везем 50 урона -> штрафуем.
-        waste_damage = max(0, total_potential_damage - target_hp)
-        waste_penalty = log2(1 + waste_damage)# или waste_damage * 0.5 если хотим пожестче
+        # Штрафуем только за УРОН, который реально мог быть нанесен, но превышает HP цели.
+        waste_damage = max(0, actual_damage - target_hp)  # <--- ИСПОЛЬЗУЕМ actual_damage
+        waste_penalty = log2(1 + waste_damage)
 
         # --- ИТОГОВАЯ ФОРМУЛА ---
-        # (Скорректированный урон * Ценность Цели * Множитель Убийства) - Штраф
         numerator = (utility_score_base * target_val * kill_multiplier) - waste_penalty
 
-        # Делим на стоимость пути (Урон в пересчете на 1 Очко Движения транспорта)
         final_utility = max(0.0, numerator / cost_denominator)
         # На подумать...
         '''
@@ -283,7 +332,100 @@ class TransportPlan:
             passengers_id.append(u_id)
         passengers_id = sorted(passengers_id)
         passengers_str = ', '.join(passengers_id)
-        return f"Transport: {self.transport[ID_KEY]} took units {passengers_str} and transit to target: {self.target[ID_KEY]} ({self.path[-1]}). Utility: {self.utility}"
+
+        unloading_str = ''
+        for u_id, pos in self.unload_map.items():
+            unloading_str += f'{u_id} -> {pos} '
+
+        return (
+            f"Transport: {self.transport[ID_KEY]} took units {passengers_str} "
+            f"and transit to unload position {self.path[-1]}\n"
+            f"Units attack target {self.target[ID_KEY]} {self.target[POS_KEY]} from positions: {unloading_str}.\n"
+            f"Utility: [{self.utility}]"
+        )
 
     def to_path(self):
         return self.transport[ID_KEY], self.path
+
+    @staticmethod
+    def solve_best_unload_configuration(
+            drop_zone: Tuple[int, int],
+            target_pos: Tuple[int, int],
+            passengers: List[dict],
+            enemy_positions: List[Tuple[int, int]],
+            other_obstacles: List[Tuple[int, int]],
+            grid: HexGrid,
+            pf: AStar
+    ) -> Tuple[Dict[str, Tuple[int, int]], float]:
+
+        """
+        Находит такую расстановку юнитов по свободным клеткам,
+        которая дает МАКСИМАЛЬНЫЙ суммарный урон.
+        """
+
+        # 1. Находим доступные слоты (гексы)
+        neighbors = grid.get_neighbors(drop_zone, include_self=False)
+        available_hexes = []
+
+        blocked_set = set(enemy_positions) | set(other_obstacles)
+
+        for h, _ in neighbors:
+            if not grid.has_obstacle(h) and h not in blocked_set:
+                available_hexes.append(h)
+
+        # Если мест меньше, чем пассажиров, придется кого-то оставить в машине (или выбрать подмножество)
+        # Но для простоты предположим, что мы пытаемся высадить максимум
+
+        best_mapping = {}
+        max_total_damage = -1.0
+
+        # 2. Перебираем варианты: Какой юнит на какой гекс?
+        # itertools.permutations генерирует варианты назначения.
+        # Если гексов больше чем юнитов, берем permutations(hexes, len(units))
+
+        num_units = len(passengers)
+        num_slots = len(available_hexes)
+
+        # Генерируем все возможные назначения (Slots -> Units)
+        # Если слотов 4, а юнитов 2: выбираем 2 слота из 4 и расставляем юнитов
+
+        # Чтобы не усложнять, сделаем перебор назначений:
+        # Вариант: [(Unit1, HexA), (Unit2, HexB)], [(Unit1, HexB), (Unit2, HexA)] ...
+
+        if num_slots == 0:
+            return {}, 0.0
+
+        # Оптимизация: перебираем слоты для юнитов
+        import itertools
+
+        # Генерируем все возможные распределения (длиной min(units, slots))
+        limit = min(num_units, num_slots)
+
+        # Берем комбинации слотов, которые будем использовать
+        for hex_subset in itertools.permutations(available_hexes, limit):
+            # hex_subset[0] достается passengers[0]
+            # hex_subset[1] достается passengers[1]
+
+            current_mapping = {}
+            current_damage = 0.0
+
+            for i in range(limit):
+                unit = passengers[i]
+                hex_pos = hex_subset[i]
+
+                # Проверка дистанции атаки
+                path = pf.find_path(hex_pos, target_pos)
+                dist = grid.calculate_cost(path)
+                if dist <= unit[ATTACK_RANGE_KEY]:
+                    dmg = unit[DAMAGE_KEY]
+                else:
+                    dmg = 0.0  # Юнит высадился, но не достает
+
+                current_mapping[unit[ID_KEY]] = hex_pos
+                current_damage += dmg
+
+            if current_damage > max_total_damage:
+                max_total_damage = current_damage
+                best_mapping = current_mapping.copy()
+
+        return best_mapping, max_total_damage

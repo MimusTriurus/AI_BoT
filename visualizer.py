@@ -202,6 +202,8 @@ class HexVisualizer:
         start = self.hex_to_pixel(from_pos)
         end = self.hex_to_pixel(to_pos)
 
+        pygame.draw.line(self.screen, 'red', start, end, 3)
+        return
         current_x = start[0] + (end[0] - start[0]) * progress
         current_y = start[1] + (end[1] - start[1]) * progress
 
@@ -280,17 +282,16 @@ class HexVisualizer:
             y += 20
 
     def animate_solution(self, solution: Dict, units: List[Dict], targets: List[Dict]):
-        for u_idx, path in solution["paths"].items():
-            self.animation_state[u_idx] = {
+        for u_id, path in solution["paths"].items():
+            self.animation_state[u_id] = {
                 'state': AnimationState.IDLE,
                 'path': path,
                 'path_index': 0,
                 'progress': 0.0,
-                #'target_idx': assignment['target_idx']
             }
             for assignment in solution['assignments']:
-                if assignment['unit_idx'] == u_idx:
-                    self.animation_state[u_idx]['target_idx'] = assignment['target_idx']
+                if assignment['unit_idx'] == u_id:
+                    self.animation_state[u_id]['target_idx'] = assignment['target_idx']
                     break
 
         for target in targets:
@@ -335,24 +336,6 @@ class HexVisualizer:
 
                     elif anim['state'] == AnimationState.ATTACKING:
                         all_idle = False
-                        anim['progress'] += dt * 2.0
-
-                        if anim['progress'] >= 1.0:
-                            if 'target_idx' in anim:
-                                t_idx = anim['target_idx']
-                                target = targets[t_idx]
-                                unit = units[u_idx]
-
-                                target['current_hp'] -= unit['damage']
-
-                                self.damage_effects.append({
-                                    'pos': target['pos'],
-                                    'damage': unit['damage'],
-                                    'lifetime': 1.0,
-                                    'max_lifetime': 1.0
-                                })
-                            anim['state'] = AnimationState.IDLE
-                            anim['progress'] = 0.0
 
                 if animation_phase == 0 and all_idle:
                     for anim in self.animation_state.values():
@@ -372,7 +355,7 @@ class HexVisualizer:
 
             for u_id, path in solution['paths'].items():
                 u_id = str(u_id)
-                color = 'red' if 'LT' in u_id else 'green'
+                color = 'blue' if 'LT_' in u_id else 'green'
                 self.draw_path(path, color)
 
             for target in targets:

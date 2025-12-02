@@ -1,9 +1,14 @@
 from typing import List, Tuple, Dict, Optional
 
-from examples.data_structures import *
+from AI_BoT.data_structures import *
 from w9_pathfinding.envs import HexGrid
 
-def find_attack_positions_for_unit(grid: HexGrid, target_pos: Tuple, weapon_range: int, move_range: int = 0) -> List[Tuple]:
+def find_attack_positions_for_unit(
+        grid: HexGrid,
+        target_pos: Tuple[int, int],
+        weapon_range: int,
+        move_range: int = 0
+) -> List[Tuple[int, int]]:
     visited = {target_pos}
     frontier = [target_pos]
     attack_range = weapon_range + move_range
@@ -19,7 +24,7 @@ def find_attack_positions_for_unit(grid: HexGrid, target_pos: Tuple, weapon_rang
     visited.remove(target_pos)
     return list(visited)
 
-def find_unload_positions(grid, target: Dict, units: List[Dict]) -> List:
+def find_unload_positions(grid, target: Dict, units: List[Dict]) -> List[Tuple[int, int]]:
     target_pos = target[POS_KEY]
     # Находим все возможные позиции атаки для каждого юнита
     unit_attack_positions = []
@@ -59,7 +64,6 @@ def find_unload_positions(grid, target: Dict, units: List[Dict]) -> List:
         common_positions = min_range_positions
 
     return common_positions
-
 
 def insert_after(lst, target, new_value):
     try:

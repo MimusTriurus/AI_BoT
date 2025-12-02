@@ -4,7 +4,7 @@ from typing import List, Dict, Tuple, Set
 from collections import defaultdict
 import time
 
-from examples.data_structures import *
+from AI_BoT.data_structures import *
 
 
 class GeneticTransportOptimizer:

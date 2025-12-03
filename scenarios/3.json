@@ -1,0 +1,18 @@
+{
+  "my_units_storage": [
+    {"id": "T_1",   "pos": [0, 0],  "type": "TANK"                                          },
+    {"id": "SC_1",  "pos": [1, 0],  "type": "SCORCHER"                                      },
+    {"id": "T_2",   "pos": [1, 2],  "type": "TANK"                                          },
+    {"id": "T_3",   "pos": [1, 6],  "type": "TANK"                                          },
+    {"id": "T_4",   "pos": [6, 7],  "type": "TANK"                                          },
+    {"id": "SC_2",  "pos": [5, 7],  "type": "SCORCHER"                                      }
+  ],
+  "en_units_storage": [
+    {"id": "#1",    "pos": [5, 1],  "type": "ABSTRACT_TARGET"                               },
+    {"id": "#2",    "pos": [5, 4],  "type": "ABSTRACT_TARGET"                               },
+    {"id": "#3",    "pos": [10, 9], "type": "ABSTRACT_TARGET"                               }
+  ],
+  "transports": [
+    {"id": "LT_1",  "pos": [1, 1],  "type": "LAND_TRANSPORT"                                }
+  ]
+}

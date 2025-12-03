@@ -1,15 +1,15 @@
-from itertools import combinations, chain
-from typing import Dict, Tuple, List, Set, Optional, Any
+from itertools import combinations
 from itertools import permutations
+from typing import Dict, List, Tuple, Optional
 
 import pygame
 
-from AI_BoT.data_structures import UnitType
-from AI_BoT.genetic_algo import optimize_transport_plans
+from AI_BoT.common.constants import UnitType, ID_KEY, DAMAGE_KEY, POS_KEY, ATTACK_RANGE_KEY, MOVE_RANGE_KEY
+from AI_BoT.common.units_loader import MultiUnitsLoader, UnitsStorage, units_data
+from AI_BoT.transport_plan import TransportPlan
 from AI_BoT.transport_plan_optimization import TransportPlanOptimizer
 from common.helpers import find_unload_positions, insert_after, find_attack_positions_for_unit
 from data_structures import *
-from clustering import *
 from visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
@@ -278,41 +278,36 @@ def solve_transport_mission(
             if grid.has_obstacle(obs):
                 grid.remove_obstacle(obs)
 
+
+
+scenario_path = "AI_BoT/scenarios/3.json"
+
 if __name__ == '__main__':
     map_size = 22
     map_data = [[1] * map_size] * map_size
 
     grid = HexGrid(weights=map_data, edge_collision=True, layout=HexLayout.odd_q)
     pf = AStar(grid)
-    # === MY UNITS ===
+
     my_units_storage = UnitsStorage()
-    my_units_storage.add_unit('T_1', (0, 0), UnitType.TANK)
-    my_units_storage.add_unit('SC_1', (1, 0), UnitType.SCORCHER)
+    en_units_storage = UnitsStorage()
+    transport_storage = UnitsStorage()
 
-    my_units_storage.add_unit('T_2', (1, 2), UnitType.TANK)
-    my_units_storage.add_unit('T_3', (1, 6), UnitType.TANK)
+    storages = {
+        "en_units_storage": en_units_storage,
+        "my_units_storage": my_units_storage,
+        "transports": transport_storage,
+    }
 
-    my_units_storage.add_unit('T_4', (6, 7), UnitType.TANK)
-    my_units_storage.add_unit('SC_2', (5, 7), UnitType.SCORCHER)
+    units_loader = MultiUnitsLoader(storages)
+    units_loader.load_from_json(scenario_path)
 
     units_clusters = my_units_storage.get_clusters(grid)
 
-    # === ENEMY UNITS ===
-    en_units_storage = UnitsStorage()
-    en_units_storage.add_unit('#1', (5, 1), UnitType.ABSTRACT_TARGET)
-    en_units_storage.add_unit('#2', (5, 4), UnitType.ABSTRACT_TARGET, new_hp=6)
-    en_units_storage.add_unit('#3', (10, 9), UnitType.ABSTRACT_TARGET)
-
-    # === TRANSPORTS ===
-    transport_storage = UnitsStorage()
-    transport_storage.add_unit('LT_1', (1, 1), UnitType.LAND_TRANSPORT)
-    transport_storage.add_unit('LT_2', (1, 3), UnitType.LAND_TRANSPORT)
-    #transport_storage.add_unit('LT_3', (6, 9), UnitType.LAND_TRANSPORT)
-
     # емкость транспорта
-    transport_capacity = unit_data[UnitType.LAND_TRANSPORT][5]
+    transport_capacity = units_data[UnitType.LAND_TRANSPORT][5]
     # очки передвижения транспорта
-    transport_mp = unit_data[UnitType.LAND_TRANSPORT][0]
+    transport_mp = units_data[UnitType.LAND_TRANSPORT][0]
 
     transport_loads = generate_transport_loads(units_clusters, transport_capacity)
 
@@ -395,16 +390,15 @@ if __name__ == '__main__':
                                 transport_plans.append(tp)
     optimizer = TransportPlanOptimizer(transport_plans)
 
-    #actual_plans = optimize_transport_plans(transport_plans)
-
     # actual_plans, total_utility = optimizer.optimize(method='auction')
     # auction + local search
     actual_plans, total_utility = optimizer.optimize_hybrid()
-    #actual_plans, total_utility = optimizer.optimize_branch_and_bound(actual_plans, total_utility)
+    actual_plans, total_utility = optimizer.optimize_branch_and_bound(actual_plans, total_utility)
 
     print(f'\n=================')
     for plan in actual_plans:
         print(str(plan))
+        print(f'-------')
     #print(f'=== Total utility: {total_utility} ===')
 
 # region   визуализация. Говнокод
@@ -482,7 +476,8 @@ if __name__ == '__main__':
             u_idx = next(i for i, obj in enumerate(my_units_storage.get_units()) if obj[ID_KEY] == u_id)
             solution['assignments'].append({
                 "unit_idx": u_id,
-                "target_idx": t_idx
+                "target_idx": t_idx,
+                "damage": passenger[DAMAGE_KEY]
             })
 
     units = list(my_units_storage.get_units())

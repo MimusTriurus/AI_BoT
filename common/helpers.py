@@ -1,6 +1,6 @@
 from typing import List, Tuple, Dict, Optional
 
-from AI_BoT.data_structures import *
+from AI_BoT.common.constants import *
 from w9_pathfinding.envs import HexGrid
 
 def find_attack_positions_for_unit(

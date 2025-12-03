@@ -1,20 +1,11 @@
 import random
 from collections import defaultdict, deque
+
+from AI_BoT.common.constants import *
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
 
-START_KEY = "start"
-MOVE_RANGE_KEY = "move_range"
-ATTACK_RANGE_KEY = "attack_range"
-DAMAGE_KEY = "damage"
-POS_KEY = "pos"
-VALUE_KEY = "value"
-HP_KEY = "hp"
-# ───────────────────────────────────────────────────────────────────────────────
-# HEX DISTANCE FOR odd-q axial
-# ───────────────────────────────────────────────────────────────────────────────
-#pf: AStar
 
 # --- безопасная A* метрика ---
 def hex_distance_astar(pf, a, b):
@@ -307,59 +298,3 @@ def visualize_ascii(map_grid, units, clusters, cluster_symbols=None):
         text.append(row)
 
     return "\n".join(text)
-
-if __name__ == '__main__':
-    map_data_small = [
-        [1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1, 1],
-    ]
-    map_data = [[1] * 40] * 40
-
-    units = [
-        {POS_KEY: (0, 0), MOVE_RANGE_KEY: 5, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
-        {POS_KEY: (1, 0), MOVE_RANGE_KEY: 5, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
-        #{POS_KEY: (1, 1), MOVE_RANGE_KEY: 5, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
-        {POS_KEY: (1, 2), MOVE_RANGE_KEY: 5, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
-        {POS_KEY: (1, 6), MOVE_RANGE_KEY: 5, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
-        {POS_KEY: (6, 6), MOVE_RANGE_KEY: 5, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
-        {POS_KEY: (5, 6), MOVE_RANGE_KEY: 5, ATTACK_RANGE_KEY: 1, DAMAGE_KEY: 1},
-    ]
-
-    targets = [
-        {POS_KEY: (5, 1), VALUE_KEY: 0.5, HP_KEY: 2},
-        {POS_KEY: (6, 5), VALUE_KEY: 0.5, HP_KEY: 2},
-    ]
-
-    transports = [
-        {POS_KEY: (1, 1), VALUE_KEY: 0.5, HP_KEY: 2},
-        {POS_KEY: (1, 3), VALUE_KEY: 0.5, HP_KEY: 2},
-    ]
-
-    grid = HexGrid(weights=map_data, edge_collision=True, layout=HexLayout.odd_q)
-    pf = AStar(grid)
-
-    units_pos = [u[POS_KEY] for u in units]
-
-    # 1. K-Means
-    centers, km_clusters = kmeans_hex(pf, units_pos, k=3)
-
-    #optimal_k, centers, clusters, sse_curve = find_optimal_k(units, k_max=10)
-
-    # 2. Соседние группы
-    prox_clusters = cluster_by_proximity(pf, units_pos, grid, max_range=2)
-    prox_clusters = {i: v for i, v in enumerate(prox_clusters)}
-    # 3. Кластеры вокруг целей
-    target_clusters = cluster_around_targets(pf, units_pos, targets)
-
-    transport_clusters = cluster_around_targets(pf, units_pos, transports)
-
-    # 4. Soft-clustering по move_range
-    soft = soft_clustering(units_pos, centers, pf, move_range=6)
-
-    # 5. ASCII визуализация
-    print(visualize_ascii(map_data, units_pos, prox_clusters))

@@ -60,7 +60,7 @@ class HexVisualizer:
             'unit_transport': 'orange',
             'target': (255, 80, 80),
             'target_damaged': (200, 60, 60),
-            'target_destroyed': (255, 255, 255),
+            'target_destroyed': (192, 192, 192),
             'path': (100, 200, 100),
             'attack_range': (255, 100, 100, 100),
             'text': (220, 220, 220),
@@ -174,28 +174,20 @@ class HexVisualizer:
         pygame.draw.rect(self.screen, color, rect)
         pygame.draw.rect(self.screen, self.COLORS['hex_border'], rect, 2)
 
-        hp_bar_width = 30
-        hp_bar_height = 4
-        hp_bar_x = center[0] - hp_bar_width / 2
-        hp_bar_y = center[1] + 18
-
-        pygame.draw.rect(self.screen, self.COLORS['hp_bar_bg'],
-                         (hp_bar_x, hp_bar_y, hp_bar_width, hp_bar_height))
-
-        current_hp = target_data.get('current_hp', target_data['hp'])
-        hp_width = hp_bar_width * (current_hp / target_data['hp'])
-        pygame.draw.rect(self.screen, self.COLORS['hp_bar'],
-                         (hp_bar_x, hp_bar_y, hp_width, hp_bar_height))
-
-        text = self.font_small.render(str(target_data.get('id', '?')),
-                                      True, (255, 255, 255))
+        # рисуем id цели
+        text = self.font_small.render(str(target_data.get('id', '?')),True, (255, 255, 255))
         text_rect = text.get_rect(center=center)
         self.screen.blit(text, text_rect)
-
-        hp_text = self.font_small.render(f"{int(current_hp)}/{target_data['hp']}",
-                                         True, self.COLORS['text'])
-        text_rect = hp_text.get_rect(center=(center[0], center[1] + 30))
+        # рисуем hp цели
+        current_hp = target_data.get('current_hp', target_data['hp'])
+        hp_text = self.font_small.render(f"{int(current_hp)}/{target_data['hp']}",True, self.COLORS['text'])
+        text_rect = hp_text.get_rect(center=(center[0], center[1] + 20))
         self.screen.blit(hp_text, text_rect)
+        # рисуем value цели
+        value = target_data.get('value', 0)
+        value_text = self.font_small.render(f"{value}",True, 'red')
+        text_rect = value_text.get_rect(center=(center[0], center[1] - 20))
+        self.screen.blit(value_text, text_rect)
 
     def draw_attack_effect(self, from_pos: Tuple[int, int], to_pos: Tuple[int, int],
                            progress: float):
@@ -282,6 +274,11 @@ class HexVisualizer:
             y += 20
 
     def animate_solution(self, solution: Dict, units: List[Dict], targets: List[Dict]):
+        for target in targets:
+            if 'current_hp' not in target:
+                target['current_hp'] = target['hp']
+                target['hp_after_attack'] = target['hp']
+
         for u_id, path in solution["paths"].items():
             self.animation_state[u_id] = {
                 'state': AnimationState.IDLE,
@@ -291,12 +288,13 @@ class HexVisualizer:
             }
             for assignment in solution['assignments']:
                 if assignment['unit_idx'] == u_id:
-                    self.animation_state[u_id]['target_idx'] = assignment['target_idx']
+                    t_idx = assignment['target_idx']
+                    self.animation_state[u_id]['target_idx'] = t_idx
                     break
 
-        for target in targets:
-            if 'current_hp' not in target:
-                target['current_hp'] = target['hp']
+        for assignment in solution['assignments']:
+            t_idx = assignment['target_idx']
+            targets[t_idx]['hp_after_attack'] -= assignment['damage']
 
         animation_phase = 0
 
@@ -357,6 +355,10 @@ class HexVisualizer:
                 u_id = str(u_id)
                 color = 'blue' if 'LT_' in u_id else 'green'
                 self.draw_path(path, color)
+
+            if animation_phase == 2:
+                for target in targets:
+                    target['current_hp'] = target['hp_after_attack']
 
             for target in targets:
                 target_destroyed = target['current_hp'] <= 0

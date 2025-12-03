@@ -1,29 +1,12 @@
 from typing import List, Set, Dict, Tuple, Optional
 from collections import defaultdict
-import heapq
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-import multiprocessing
-from functools import partial
-
+from common.constants import *
 
 class TransportPlanOptimizer:
-    """
-    Оптимизатор транспортных планов на основе аукциона задач.
-    Максимизирует суммарную utility с учётом конфликтов по ресурсам.
-    """
-
     def __init__(self, plans: List['TransportPlan']):
-        """
-        Args:
-            plans: Список всех возможных TransportPlan
-        """
         self.plans = plans
         self.selected_plans: List['TransportPlan'] = []
         self.total_utility = 0.0
-
-    # =========================================================================
-    # ГИБРИДНЫЙ ПОДХОД: AUCTION + LOCAL SEARCH
-    # =========================================================================
 
     def optimize_hybrid(self) -> Tuple[List['TransportPlan'], float]:
         """
@@ -85,7 +68,7 @@ class TransportPlanOptimizer:
 
         # 1. КОНФЛИКТ ЮНИТОВ
         for passenger in candidate_plan.passengers:
-            u_id = passenger['id']
+            u_id = passenger[ID_KEY]
             # Конфликт, если юнит занят (в global_used_units) И он не является моим юнитом (not in my_held_units)
             if u_id in global_used_units and u_id not in my_held_units:
                 return True  # Конфликт: Юнит занят другим транспортом
@@ -315,18 +298,18 @@ class TransportPlanOptimizer:
 
         # Инициализация HP целей
         for plan in solution:
-            target_id = plan.target['id']
+            target_id = plan.target[ID_KEY]
             if target_id not in target_hp_remaining:
-                target_hp_remaining[target_id] = plan.target['hp']
+                target_hp_remaining[target_id] = plan.target[HP_KEY]
 
         # Сортируем планы по utility (сначала выполняем лучшие)
         sorted_solution = sorted(solution, key=lambda p: p.utility, reverse=True)
 
         for plan in sorted_solution:
-            target_id = plan.target['id']
+            target_id = plan.target[ID_KEY]
             remaining_hp = target_hp_remaining[target_id]
 
-            total_damage = sum(p['damage'] for p in plan.passengers)
+            total_damage = sum(p[DAMAGE_KEY] for p in plan.passengers)
             real_damage = min(total_damage, remaining_hp)
 
             if total_damage > 0:
@@ -361,10 +344,10 @@ class TransportPlanOptimizer:
         new_used['occupied_hexes'].update(plan.occupied_hexes_set)
 
         # Обновляем HP цели
-        target_id = plan.target['id']
-        target_remaining_hp = new_used['targets'].get(target_id, plan.target['hp'])
+        target_id = plan.target[ID_KEY]
+        target_remaining_hp = new_used['targets'].get(target_id, plan.target[HP_KEY])
 
-        total_damage = sum(p['damage'] for p in plan.passengers)
+        total_damage = sum(p[DAMAGE_KEY] for p in plan.passengers)
         real_damage = min(total_damage, target_remaining_hp)
 
         new_used['targets'][target_id] = target_remaining_hp - real_damage
@@ -374,9 +357,9 @@ class TransportPlanOptimizer:
     def _calculate_adjusted_utility(self, plan, used_resources: Dict) -> float:
         """Вычисляет скорректированную utility с учётом overkill."""
         target_id = plan.target['id']
-        target_remaining_hp = used_resources['targets'].get(target_id, plan.target['hp'])
+        target_remaining_hp = used_resources['targets'].get(target_id, plan.target[HP_KEY])
 
-        total_damage = sum(p['damage'] for p in plan.passengers)
+        total_damage = sum(p[DAMAGE_KEY] for p in plan.passengers)
         real_damage = min(total_damage, target_remaining_hp)
 
         if total_damage > 0:
@@ -392,13 +375,13 @@ class TransportPlanOptimizer:
         """
 
         # 1. Конфликт Транспортов (ID)
-        transport_id = plan.transport['id']
+        transport_id = plan.transport[ID_KEY]
         if transport_id in used_resources['transports']:
             return True
 
         # 2. Конфликт Юнитов (ID)
         for passenger in plan.passengers:
-            unit_id = passenger['id']
+            unit_id = passenger[ID_KEY]
             if unit_id in used_resources['units']:
                 return True
 
@@ -508,7 +491,7 @@ class TransportPlanOptimizer:
         # Группировка планов по ID транспорта
         plans_by_transport = defaultdict(list)
         for plan in self.plans:
-            plans_by_transport[plan.transport['id']].append(plan)
+            plans_by_transport[plan.transport[ID_KEY]].append(plan)
 
         # --- ИНИЦИАЛИЗАЦИЯ СОСТОЯНИЯ ---
         selected_plans_map: Dict[str, 'TransportPlan'] = {}
@@ -518,9 +501,9 @@ class TransportPlanOptimizer:
 
         target_hp_remaining = {}
         for plan in self.plans:
-            t_id = plan.target['id']
+            t_id = plan.target[ID_KEY]
             if t_id not in target_hp_remaining:
-                target_hp_remaining[t_id] = plan.target['hp']
+                target_hp_remaining[t_id] = plan.target[HP_KEY]
 
         # (TransportID, TargetID) -> RealDamage
         real_damage_ledger = {}
@@ -546,15 +529,15 @@ class TransportPlanOptimizer:
 
                 if current_plan:
                     # Получаем реальный урон из леджера
-                    current_real_damage = real_damage_ledger.get((transport_id, current_plan.target['id']), 0.0)
-                    total_pot = sum(p['damage'] for p in current_plan.passengers)
+                    current_real_damage = real_damage_ledger.get((transport_id, current_plan.target[ID_KEY]), 0.0)
+                    total_pot = sum(p[DAMAGE_KEY] for p in current_plan.passengers)
 
                     if total_pot > 0:
                         ratio = current_real_damage / total_pot
                         current_net_utility = current_plan.utility * ratio
 
                     # Запоминаем свои текущие ресурсы для переиспользования:
-                    my_held_units = {p['id'] for p in current_plan.passengers}
+                    my_held_units = {p[ID_KEY] for p in current_plan.passengers}
                     my_occupied_hexes = current_plan.occupied_hexes_set
 
                 # Инициализируем лучшего кандидата текущим состоянием
@@ -576,14 +559,14 @@ class TransportPlanOptimizer:
                         continue  # План невалиден
 
                     # --- Б. В, Г. РАСЧЕТ UTILITY (Уникальная логика Аукциона) ---
-                    target_id = plan.target['id']
+                    target_id = plan.target[ID_KEY]
                     hp_snapshot = target_hp_remaining[target_id]
 
                     # Если я уже атакую эту цель, временно возвращаем мой урон для честного расчета
-                    if current_plan and current_plan.target['id'] == target_id:
+                    if current_plan and current_plan.target[ID_KEY] == target_id:
                         hp_snapshot += real_damage_ledger.get((transport_id, target_id), 0.0)
 
-                    total_damage_potential = sum(p['damage'] for p in plan.passengers)
+                    total_damage_potential = sum(p[DAMAGE_KEY] for p in plan.passengers)
                     real_damage_forecast = min(total_damage_potential, hp_snapshot)
 
                     if total_damage_potential > 0:
@@ -604,13 +587,13 @@ class TransportPlanOptimizer:
                     # ROLLBACK (Откат старого плана)
                     if current_plan:
                         # 1. Возвращаем HP
-                        prev_tid = current_plan.target['id']
+                        prev_tid = current_plan.target[ID_KEY]
                         restored_dmg = real_damage_ledger.pop((transport_id, prev_tid), 0.0)
                         target_hp_remaining[prev_tid] += restored_dmg
 
                         # 2. Освобождаем юнитов
                         for p in current_plan.passengers:
-                            used_units.discard(p['id'])
+                            used_units.discard(p[ID_KEY])
 
                         # 3. Освобождаем ВСЕ гексы (транспорт + десант) <--- ОБНОВЛЕНО
                         for hex_pos in current_plan.occupied_hexes_set:
@@ -620,11 +603,11 @@ class TransportPlanOptimizer:
 
                     # COMMIT (Применение нового плана)
                     if best_plan:
-                        new_tid = best_plan.target['id']
+                        new_tid = best_plan.target[ID_KEY]
 
                         # 1. Занимаем юнитов
                         for p in best_plan.passengers:
-                            used_units.add(p['id'])
+                            used_units.add(p[ID_KEY])
 
                         # 2. Занимаем ВСЕ гексы (транспорт + десант) <--- ОБНОВЛЕНО
                         all_occupied_hexes.update(best_plan.occupied_hexes_set)

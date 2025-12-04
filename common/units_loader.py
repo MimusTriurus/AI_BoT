@@ -1,39 +1,27 @@
 import json
 from typing import List, Dict, Tuple, Optional, Set
 from AI_BoT.clustering import cluster_by_proximity, kmeans_hex, soft_clustering
+from AI_BoT.common.units_data_loader import UnitsDataLoader
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.envs import HexGrid
 from AI_BoT.common.constants import *
 from AI_BoT.common.constants import UnitType
 
-# m - move,
-# w - weapon
-# d - damage,
-# r - weapon range,
-# h - hp,
-# v - value,
-# c - capacity (transport)
-units_data = {
-    #                                 m    d   r   h   v   c
-    UnitType.TANK:                  ( 2 ,  2,  1,  5,  2,  0 ),
-    UnitType.LAND_TRANSPORT:        ( 5,   0,  0,  3,  1,  2 ),
-    UnitType.ABSTRACT_TARGET:       ( 0 ,  0,  0,  4,  9,  0 ),
-    UnitType.LAV:                   ( 1 ,  1,  1,  4,  1,  0 ),
-    UnitType.SCORCHER:              ( 1 ,  2,  2,  4,  2,  0 ),
-}
-
+u_data_loader = UnitsDataLoader(UnitType)
+units_data = u_data_loader.load('AI_BoT/data/units_data.json')
 
 def make_unit(u_id, pos, unit_type: UnitType):
     unit_data = units_data[UnitType(unit_type.value)]
     unit = {
         ID_KEY: u_id,
         POS_KEY: pos,
-        MOVE_RANGE_KEY:     unit_data[0],
-        DAMAGE_KEY:         unit_data[1],
-        ATTACK_RANGE_KEY:   unit_data[2],
-        HP_KEY:             unit_data[3],
-        VALUE_KEY:          unit_data[4],
-        CAPACITY_KEY:       unit_data[5],
+        MOVE_RANGE_KEY:         unit_data[0],
+        DAMAGE_KEY:             unit_data[1],
+        MIN_ATTACK_RANGE_KEY:   unit_data[2][0],
+        MAX_ATTACK_RANGE_KEY:   unit_data[2][1],
+        HP_KEY:                 unit_data[3],
+        VALUE_KEY:              unit_data[4],
+        CAPACITY_KEY:           unit_data[5],
     }
     return unit
 
@@ -79,8 +67,10 @@ class UnitsStorage:
                 return u
         return None
 
-    def get_clusters(self, grid):
-        units_poses = self.get_units_pos()
+    def get_clusters(self, grid, filter_predicate = None):
+        units_poses = [u[POS_KEY] for u in self.units.values() if filter_predicate(u)] if filter_predicate else self.get_units_pos()
+        if not units_poses:
+            return dict()
         pf = AStar(grid)
         centers, clusters = kmeans_hex(pf, units_poses, k=3)
         # кластеризация по степени близости

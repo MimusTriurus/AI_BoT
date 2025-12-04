@@ -1,0 +1,11 @@
+{
+  "my_units_storage": [
+    {"id": "SC_1",  "pos": [1, 0],  "type": "SCORCHER"                                      }
+  ],
+  "en_units_storage": [
+    {"id": "#1",    "pos": [5, 1],  "type": "ABSTRACT_TARGET"                               }
+  ],
+  "transports": [
+    {"id": "LT_1",  "pos": [1, 1],  "type": "LAND_TRANSPORT"                                }
+  ]
+}

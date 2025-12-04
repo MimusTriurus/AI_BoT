@@ -1,0 +1,12 @@
+{
+  "my_units_storage": [
+    {"id": "RL_1",  "pos": [0, 1],  "type": "ROCKET_LAUNCHER"                                      },
+    {"id": "AM_1",  "pos": [1, 2],  "type": "AMPHIBIA"                                             }
+  ],
+  "en_units_storage": [
+    {"id": "#1",    "pos": [7, 1],  "type": "ABSTRACT_TARGET"                                      }
+  ],
+  "transports": [
+    {"id": "LT_1",  "pos": [1, 1],  "type": "LAND_TRANSPORT"                                       }
+  ]
+}

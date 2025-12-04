@@ -1,8 +1,5 @@
-from dataclasses import dataclass
-from enum import Enum
 from math import log2
 from typing import List, Dict, Tuple, Optional, Set
-from clustering import cluster_by_proximity, kmeans_hex, soft_clustering
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.envs import HexGrid
 from common.constants import *
@@ -77,7 +74,7 @@ class TransportPlan:
                 dist = self.grid.calculate_cost(path)
 
                 # Если юнит достает до цели с назначенной ему точки выгрузки
-                if dist <= unit[ATTACK_RANGE_KEY]:
+                if dist <= unit[MAX_ATTACK_RANGE_KEY]:
                     total_damage += unit[DAMAGE_KEY]
 
         return total_damage
@@ -122,13 +119,15 @@ class TransportPlan:
                 # Юниту не обязательно вставать НА цель, достаточно подойти на radius_attack.
                 # Предполагаем, что последние N шагов (равные радиусу) можно не делать.
                 # Это грубая оценка, но эффективная.
-                attack_range_discount = unit.get(ATTACK_RANGE_KEY, 1)
+                attack_range_discount = unit.get(MAX_ATTACK_RANGE_KEY, 1)
                 adjusted_walk_cost = max(0, walk_cost - attack_range_discount)
 
                 if adjusted_walk_cost <= unit[MOVE_RANGE_KEY]:
                     can_reach_on_foot = True
+
             cost_path_2_target = self.grid.calculate_cost(self.pf.find_path(self.unload_map[unit[ID_KEY]], self.target[POS_KEY]))
-            is_unit_attacking = self.unload_map.get(unit[ID_KEY]) is not None and cost_path_2_target <= unit[ATTACK_RANGE_KEY]
+            is_unit_attacking = self.unload_map.get(unit[ID_KEY]) is not None and cost_path_2_target <= unit[MAX_ATTACK_RANGE_KEY]
+
             if is_unit_attacking:
                 if can_reach_on_foot:
                     damage_available_on_foot += dmg
@@ -167,7 +166,7 @@ class TransportPlan:
             if damage_available_on_foot >= target_hp:
                 kill_multiplier = 1.1
             else:
-                kill_multiplier = 2.0
+                kill_multiplier = 4.0
 
         # 4. Штраф за Оверхед (Waste Penalty)
         # Штрафуем только за УРОН, который реально мог быть нанесен, но превышает HP цели.
@@ -184,7 +183,6 @@ class TransportPlan:
         capacity = self.transport.get(CAPACITY_KEY, len(self.passengers))
         load_factor = len(self.passengers) / max(1, capacity)
         final_utility *= (0.5 + 0.5 * load_factor)
-
         # === Учитываем остаток очков движения ===
         move_range = self.transport[MOVE_RANGE_KEY]
         delivery_cost = self.grid.calculate_cost(self.delivery_path)
@@ -233,12 +231,10 @@ class TransportPlan:
             grid: HexGrid,
             pf: AStar
     ) -> Tuple[Dict[str, Tuple[int, int]], float]:
-
         """
         Находит такую расстановку юнитов по свободным клеткам,
         которая дает МАКСИМАЛЬНЫЙ суммарный урон.
         """
-
         # 1. Находим доступные слоты (гексы)
         neighbors = grid.get_neighbors(drop_zone, include_self=False)
         available_hexes = []
@@ -292,7 +288,7 @@ class TransportPlan:
                 # Проверка дистанции атаки
                 path = pf.find_path(hex_pos, target_pos)
                 dist = grid.calculate_cost(path)
-                if dist <= unit[ATTACK_RANGE_KEY]:
+                if dist <= unit[MAX_ATTACK_RANGE_KEY]:
                     dmg = unit[DAMAGE_KEY]
                 else:
                     dmg = 0.0  # Юнит высадился, но не достает

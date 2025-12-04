@@ -4,283 +4,25 @@ from typing import Dict, List, Tuple, Optional
 
 import pygame
 
-from AI_BoT.common.constants import UnitType, ID_KEY, DAMAGE_KEY, POS_KEY, ATTACK_RANGE_KEY, MOVE_RANGE_KEY
+from AI_BoT.common.constants import UnitType, ID_KEY, DAMAGE_KEY, POS_KEY, MAX_ATTACK_RANGE_KEY, MOVE_RANGE_KEY, \
+    MIN_ATTACK_RANGE_KEY
 from AI_BoT.common.units_loader import MultiUnitsLoader, UnitsStorage, units_data
+from AI_BoT.transport_mission_solver import solve_transport_mission
 from AI_BoT.transport_plan import TransportPlan
 from AI_BoT.transport_plan_optimization import TransportPlanOptimizer
-from common.helpers import find_unload_positions, insert_after, find_attack_positions_for_unit
-from data_structures import *
+from common.helpers import find_unload_positions, insert_after, find_attack_positions_for_unit, \
+    generate_transport_loads, get_units_could_unload
+#from common.constants import *
 from visualizer import HexVisualizer
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
 
-UTILITY_THRESHOLD = 5
+UTILITY_THRESHOLD = 1
 
-
-def generate_transport_loads(cluster_units: Dict[int, List[Tuple[int, int]]], transport_capacity: int):
-    """
-    cluster_units: dict {cluster_id: [(x1,y1), (x2,y2), ...]}
-    T: вместимость транспорта (максимальное число юнитов)
-
-    Возвращает:
-        dict {cluster_id: [ [u1,u2], [u1], ... ] } - все возможные пакеты
-    """
-    all_loads = {}
-
-    for cid, units in cluster_units.items():
-        # генерируем все комбинации размера 1..T
-        loads = []
-        for r in range(1, min(transport_capacity, len(units)) + 1):
-            loads.extend(combinations(units, r))
-
-        # преобразуем из tuple в list
-        all_loads[cid] = sorted([list(l) for l in loads], key=lambda x: -len(x))
-
-    return all_loads
-
-
-def filter_transport_options(transport_pos, unit_packages, targets, transport_mp, pf):
-    valid_targets = {}
-
-    # --- 1. Фильтруем недоступные цели ---
-    reachable_targets = []
-    for t in targets:
-        path = pf.find_path(transport_pos, t)
-        if path:  # путь найден
-            reachable_targets.append(t)
-        # иначе цель недостижима, пропускаем
-
-    # --- 2. Фильтруем пакеты по каждой цели ---
-    for t in reachable_targets:
-        valid_packages = []
-
-        for package in unit_packages:
-            # вычисляем минимальный маршрут сбора всех юнитов и доставки
-            current = transport_pos
-            remaining = set(package)
-            cost = 0
-
-            # жадный алгоритм: всегда идём к ближайшему юниту
-            while remaining:
-                next_u = min(remaining, key=lambda u: len(pf.find_path(current, u)))
-                path_len = len(pf.find_path(current, next_u))
-                if path_len == 999999:
-                    cost = float('inf')  # недостижимый юнит
-                    break
-                cost += path_len
-                current = next_u
-                remaining.remove(next_u)
-
-            if cost == float('inf'):
-                continue  # пакет недостижим
-
-            # доставка к цели
-            delivery_cost = len(pf.find_path(current, t))
-            if delivery_cost == 999999:
-                continue  # цель недостижима
-            cost += delivery_cost
-
-            # проверка по MP транспорта
-            if cost <= transport_mp:
-                valid_packages.append(package)
-
-        if valid_packages:
-            valid_targets[t] = valid_packages
-
-    return valid_targets
-
-
-def evaluate_transport_loads(loads, transport_start, delivery_pos, pf):
-    """
-    loads: list пакетов юнитов, где юнит = (x,y)
-    transport_start: стартовая позиция транспорта (x,y)
-    delivery_pos: позиция доставки (x,y)
-    pf: AStar pathfinder
-
-    Возвращает:
-        dict {tuple(unit_positions): cost}
-    """
-    load_costs = {}
-
-    for package in loads:
-        if not package:
-            continue
-
-        min_cost = float('inf')
-
-        # перебираем все порядки забора юнитов
-        for order in permutations(package):
-            cost = 0
-            current = transport_start
-
-            # путь до каждого юнита
-            for u in order:
-                cost += len(pf.find_path(current, u))
-                current = u
-
-            # доставка к цели
-            cost += len(pf.find_path(current, delivery_pos))
-
-            if cost < min_cost:
-                min_cost = cost
-
-        load_costs[tuple(package)] = min_cost
-
-    return load_costs
-
-
-def solve_transport_mission(
-        transport_pos: Tuple[int, int],
-        transport_mp: int,
-        passengers: List[Tuple[int, int]],
-        drop_zone: Tuple[int, int],
-        enemy_positions: List[Tuple[int, int]],  # <--- НОВЫЙ АРГУМЕНТ: Все враги на карте
-        grid: HexGrid,  # HexGrid
-        pf: AStar
-) -> tuple[Optional[tuple], float, list]:
-    # Список для глобальной очистки (чтобы вернуть сетку в исходное состояние)
-    mission_obstacles = []
-
-    try:
-        # --- ЭТАП SETUP: Превращаем юнитов в препятствия ---
-
-        # 1. Добавляем ПАССАЖИРОВ (своих)
-        for p in passengers:
-            if not grid.has_obstacle(p) and p != transport_pos:
-                grid.add_obstacle(p)
-                mission_obstacles.append(p)
-
-        # 2. Добавляем ВСЕХ ВРАГОВ
-        # Враги - это статичные препятствия для движения транспорта.
-        for enemy in enemy_positions:
-            # Защита: Drop Zone не должна быть занята врагом (иначе туда не приехать).
-            # Но если drop_zone это соседняя клетка, то все ок.
-            if enemy == drop_zone:
-                # Если цель высадки занята врагом, транспорт туда физически не встанет.
-                # A* вернет None, если destination занят.
-                # Но мы все равно помечаем, так как стоять на враге нельзя.
-                pass
-
-            if not grid.has_obstacle(enemy):
-                grid.add_obstacle(enemy)
-                mission_obstacles.append(enemy)
-
-        # --- Переменные поиска ---
-        best_sequence = None
-        min_mp_cost = float('inf')
-        best_full_path = []
-
-        # 3. ПЕРЕБОР (TSP)
-        for sequence in permutations(passengers):
-
-            current_pos = transport_pos
-            current_accumulated_cost = 0
-            full_path_hexes = []
-            is_sequence_valid = True
-
-            # Локальные изменения внутри одной ветки (только свои пассажиры)
-            sequence_removed_obstacles = []
-
-            try:
-                # --- Этап А: Сбор пассажиров ---
-                for target_unit in sequence:
-                    if transport_pos == target_unit:
-                        full_path_hexes.append(transport_pos)
-                        continue
-                    # Временно "подбираем" пассажира -> клетка освобождается
-                    grid.remove_obstacle(target_unit)
-                    sequence_removed_obstacles.append(target_unit)
-
-                    if current_accumulated_cost >= transport_mp:
-                        is_sequence_valid = False
-                        break
-
-                    neighbors = grid.get_neighbors(target_unit, include_self=False)
-                    best_leg_path = None
-                    best_leg_cost = float('inf')
-                    found_entry_point = False
-
-                    for neighbor_hex, _ in neighbors:
-                        # has_obstacle теперь вернет True для:
-                        # - Гор/Стен
-                        # - Других пассажиров
-                        # - ВСЕХ ВРАГОВ (мы их добавили выше)
-                        if grid.has_obstacle(neighbor_hex): continue
-
-                        path = pf.find_path(current_pos, neighbor_hex)
-
-                        if path:
-                            cost = grid.calculate_cost(path) if isinstance(path, list) else getattr(path, 'cost',
-                                                                                                    len(path))
-
-                            if current_accumulated_cost + cost > transport_mp: continue
-
-                            if cost < best_leg_cost:
-                                best_leg_cost = cost
-                                best_leg_path = path
-                                found_entry_point = True
-
-                    if not found_entry_point:
-                        is_sequence_valid = False
-                        break
-
-                    current_accumulated_cost += best_leg_cost
-                    path_nodes = best_leg_path if isinstance(best_leg_path, list) else getattr(best_leg_path, 'nodes',
-                                                                                               [])
-
-                    if full_path_hexes:
-                        full_path_hexes.extend(path_nodes[1:])
-                    else:
-                        full_path_hexes.extend(path_nodes)
-
-                    if path_nodes:
-                        current_pos = path_nodes[-1]
-
-                # --- Этап Б: Доставка к цели ---
-                if is_sequence_valid:
-                    # Путь к drop_zone.
-                    # Благодаря setup-фазе, A* будет огибать всех врагов.
-                    path_drop = pf.find_path(current_pos, drop_zone)
-
-                    if path_drop:
-                        cost_drop = grid.calculate_cost(path_drop) if isinstance(path_drop, list) else getattr(
-                            path_drop, 'cost', 0)
-                        total_cost = current_accumulated_cost + cost_drop
-
-                        if total_cost <= transport_mp:
-                            if total_cost < min_mp_cost:
-                                min_mp_cost = total_cost
-                                best_sequence = sequence
-                                final_nodes = path_drop if isinstance(path_drop, list) else getattr(path_drop, 'nodes',
-                                                                                                    [])
-
-                                if final_nodes:
-                                    best_full_path = list(full_path_hexes) + final_nodes[1:]
-                                else:
-                                    best_full_path = list(full_path_hexes)
-
-            finally:
-                # Восстанавливаем пассажиров текущей ветки
-                for removed_unit in sequence_removed_obstacles:
-                    if current_pos != removed_unit:
-                        grid.add_obstacle(removed_unit)
-
-        if best_sequence is None:
-            return None, 0.0, []
-
-        return best_sequence, min_mp_cost, best_full_path
-
-    finally:
-        # 4. ГЛОБАЛЬНАЯ ОЧИСТКА
-        # Убираем пассажиров И всех врагов из списка препятствий сетки
-        for obs in mission_obstacles:
-            if grid.has_obstacle(obs):
-                grid.remove_obstacle(obs)
-
-
-
-scenario_path = "AI_BoT/scenarios/3.json"
+scenario_path = "AI_BoT/scenarios/lt+rl+am.json"
+scenario_path = "AI_BoT/scenarios/lt+am.json"
+scenario_path = "AI_BoT/scenarios/1.json"
 
 if __name__ == '__main__':
     map_size = 22
@@ -302,25 +44,32 @@ if __name__ == '__main__':
     units_loader = MultiUnitsLoader(storages)
     units_loader.load_from_json(scenario_path)
 
-    units_clusters = my_units_storage.get_clusters(grid)
+
+    def is_unit_can_be_unloaded(u: dict) -> bool:
+        return u[MOVE_RANGE_KEY] - 1 > 0
+    # в кластеры включаем только тех юнитов которые могут выгрузиться и атаковать в один ход
+    units_clusters = my_units_storage.get_clusters(grid, is_unit_can_be_unloaded)
 
     # емкость транспорта
-    transport_capacity = units_data[UnitType.LAND_TRANSPORT][5]
+    lt_data = units_data[UnitType.LAND_TRANSPORT]
+    transport_capacity = lt_data[5]
     # очки передвижения транспорта
-    transport_mp = units_data[UnitType.LAND_TRANSPORT][0]
-
-    transport_loads = generate_transport_loads(units_clusters, transport_capacity)
+    transport_mp = lt_data[0]
 
     transport_plans: List[TransportPlan] = []
-
+    # просчитываем планы атаки целей боевыми юнитами без использования транспортов
     for unit in my_units_storage.get_units():
+        # todo: remove after tests
+        continue
         unit_pos = unit[POS_KEY]
         for target in en_units_storage.get_units():
+            # move_range == 0 т.к. мы пришли в точку атаки на своих двоих
             positions_2_attack = find_attack_positions_for_unit(
-                grid,
-                target[POS_KEY],
-                unit[ATTACK_RANGE_KEY],
-                0
+                grid=grid,
+                target_pos=target[POS_KEY],
+                move_range=0,
+                max_weapon_range=unit[MAX_ATTACK_RANGE_KEY],
+                min_weapon_range=unit[MIN_ATTACK_RANGE_KEY]
             )
             for position_2_attack in positions_2_attack:
                 best_order, cost, path = solve_transport_mission(
@@ -333,6 +82,7 @@ if __name__ == '__main__':
                     pf=pf
                 )
                 if best_order:
+                    # точка выгрузки совпадает с точкой атаки - т.к. боевой юнит и есть транспорт
                     unload_map = {
                         unit[ID_KEY]: position_2_attack
                     }
@@ -348,7 +98,8 @@ if __name__ == '__main__':
                     )
                     if tp.utility > 0:
                         transport_plans.append(tp)
-
+    # просчитываем планы атаки целей боевыми юнитами с использованием транспортов
+    transport_loads = generate_transport_loads(units_clusters, transport_capacity)
     for transport_pos in transport_storage.get_units_pos():
         for target in en_units_storage.get_units():
             for idx, transport_load in transport_loads.items():
@@ -388,6 +139,8 @@ if __name__ == '__main__':
                             )
                             if tp.utility > UTILITY_THRESHOLD:
                                 transport_plans.append(tp)
+
+    sorted_solution = sorted(transport_plans, key=lambda p: p.utility, reverse=True)
     optimizer = TransportPlanOptimizer(transport_plans)
 
     # actual_plans, total_utility = optimizer.optimize(method='auction')
@@ -401,7 +154,7 @@ if __name__ == '__main__':
         print(f'-------')
     #print(f'=== Total utility: {total_utility} ===')
 
-# region   визуализация. Говнокод
+# region   визуализация. Лютый говнокод
     visualizer = HexVisualizer(grid)
     units_paths = dict()
     for plan in actual_plans:

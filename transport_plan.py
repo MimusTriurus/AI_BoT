@@ -226,8 +226,7 @@ class TransportPlan:
             drop_zone: Tuple[int, int],
             target_pos: Tuple[int, int],
             passengers: List[dict],
-            enemy_positions: List[Tuple[int, int]],
-            other_obstacles: List[Tuple[int, int]],
+            enemies: List[Tuple[int, int]],
             grid: HexGrid,
             pf: AStar
     ) -> Tuple[Dict[str, Tuple[int, int]], float]:
@@ -238,8 +237,9 @@ class TransportPlan:
         # 1. Находим доступные слоты (гексы)
         neighbors = grid.get_neighbors(drop_zone, include_self=False)
         available_hexes = []
-
-        blocked_set = set(enemy_positions) | set(other_obstacles)
+        blocked_set = set()
+        for en in enemies:
+            blocked_set.add(en[POS_KEY])
 
         for h, _ in neighbors:
             if not grid.has_obstacle(h) and h not in blocked_set:

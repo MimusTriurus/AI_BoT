@@ -1,11 +1,13 @@
 import json
 from typing import List, Dict, Tuple, Optional, Set
-from AI_BoT.clustering import cluster_by_proximity, kmeans_hex, soft_clustering
-from AI_BoT.common.units_data_loader import UnitsDataLoader
+from clustering import cluster_by_proximity, kmeans_hex, soft_clustering
+from common.units_data_loader import UnitsDataLoader
+
+from AI_BoT.common.helpers import get_units_by_positions
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.envs import HexGrid
-from AI_BoT.common.constants import *
-from AI_BoT.common.constants import UnitType
+from common.constants import *
+from common.constants import UnitType
 
 u_data_loader = UnitsDataLoader(UnitType)
 units_data = u_data_loader.load('AI_BoT/data/units_data.json')
@@ -49,14 +51,7 @@ class UnitsStorage:
         return list(self.units.keys())
 
     def get_units(self, units_pos: List[Tuple[int, int]] = None) -> List:
-        if units_pos:
-            results = []
-            for u_p in units_pos:
-                if u_p in self.units:
-                    results.append(self.units[u_p])
-            return results
-        else:
-            return list(self.units.values())
+        return get_units_by_positions(self.units, units_pos)
 
     def get_unit(self, pos: Tuple):
         return self.units[pos]
@@ -75,9 +70,13 @@ class UnitsStorage:
         centers, clusters = kmeans_hex(pf, units_poses, k=3)
         # кластеризация по степени близости
         # prox_clusters = cluster_by_proximity(pf, units_poses, grid, max_range=2)
+
         # кластеризация с перекрытием
         clusters = soft_clustering(units_poses, centers, pf, move_range=5)
-        return clusters
+        # все юниты
+        clusters['all'] = units_poses
+
+        return list(clusters.values())
 
     def clear(self):
         self.units.clear()

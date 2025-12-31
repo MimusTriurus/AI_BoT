@@ -1,5 +1,7 @@
 from itertools import permutations
 from typing import Tuple, List, Optional
+
+from AI_BoT.common.constants import POS_KEY
 from w9_pathfinding.envs import HexGrid
 from w9_pathfinding.pf import IDAStar, AStar
 
@@ -8,7 +10,7 @@ def solve_transport_mission(
         transport_mp: int,
         passengers: List[Tuple[int, int]],
         drop_zone: Tuple[int, int],
-        enemy_positions: List[Tuple[int, int]],  # <--- НОВЫЙ АРГУМЕНТ: Все враги на карте
+        enemies: List[dict],
         grid: HexGrid,  # HexGrid
         pf: AStar
 ) -> tuple[Optional[tuple], float, list]:
@@ -26,18 +28,19 @@ def solve_transport_mission(
 
         # 2. Добавляем ВСЕХ ВРАГОВ
         # Враги - это статичные препятствия для движения транспорта.
-        for enemy in enemy_positions:
+        for enemy in enemies:
+            enemy_pos = enemy[POS_KEY]
             # Защита: Drop Zone не должна быть занята врагом (иначе туда не приехать).
             # Но если drop_zone это соседняя клетка, то все ок.
-            if enemy == drop_zone:
+            if enemy_pos == drop_zone:
                 # Если цель высадки занята врагом, транспорт туда физически не встанет.
                 # A* вернет None, если destination занят.
                 # Но мы все равно помечаем, так как стоять на враге нельзя.
                 pass
 
-            if not grid.has_obstacle(enemy):
-                grid.add_obstacle(enemy)
-                mission_obstacles.append(enemy)
+            if not grid.has_obstacle(enemy_pos):
+                grid.add_obstacle(enemy_pos)
+                mission_obstacles.append(enemy_pos)
 
         best_sequence = None
         min_mp_cost = float('inf')

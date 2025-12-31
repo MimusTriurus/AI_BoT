@@ -1,3 +1,16 @@
+## Список сценариев:
+- 1
+- 2
+- 3
+- 1vs1
+- 1vs1_far_target
+- lt+am
+- lt+rl+am
+- lt+sc
+- lt+t
+- lt+t_inside+t
+- lts+ts
+
 ## Легенда
 - T_n  - танк
 - SC_n - артиллерия\скорчер

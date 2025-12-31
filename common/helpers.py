@@ -99,26 +99,15 @@ def insert_after(lst, target, new_value):
     except ValueError:
         print("!")
 
-def generate_transport_loads(cluster_units: Dict[int, List[Tuple[int, int]]], transport_capacity: int):
-    """
-    cluster_units: dict {cluster_id: [(x1,y1), (x2,y2), ...]}
-    T: вместимость транспорта (максимальное число юнитов)
-
-    Возвращает:
-        dict {cluster_id: [ [u1,u2], [u1], ... ] } - все возможные пакеты
-        исключены юниты которые не могут двигаться после загрузки!
-    """
-    all_loads = {}
-
-    for cid, units in cluster_units.items():
+def generate_transport_loads(cluster_units: List[List[Tuple[int, int]]], transport_capacity: int):
+    all_loads = []
+    for units_positions in cluster_units:
         # генерируем все комбинации размера 1..T
         loads = []
-        for r in range(1, min(transport_capacity, len(units)) + 1):
-            loads.extend(combinations(units, r))
-
+        for r in range(1, min(transport_capacity, len(units_positions)) + 1):
+            loads.extend(combinations(units_positions, r))
         # преобразуем из tuple в list
-        all_loads[cid] = sorted([list(l) for l in loads], key=lambda x: -len(x))
-
+        all_loads.append(sorted([list(l) for l in loads], key=lambda x: -len(x)))
     return all_loads
 
 # список юнитов которые могут быть загружены и разгружены за один ход
@@ -128,3 +117,13 @@ def get_units_could_unload(units: List[dict]) -> List[dict]:
         if unit[MOVE_RANGE_KEY] > 1:
             result.append(unit)
     return result
+
+def get_units_by_positions(units: Dict[Tuple[int, int], dict], units_pos: List[Tuple[int, int]] = None) -> List[dict]:
+    if units_pos:
+        results = []
+        for u_p in units_pos:
+            if u_p in units:
+                results.append(units[u_p])
+        return results
+    else:
+        return list(units.values())

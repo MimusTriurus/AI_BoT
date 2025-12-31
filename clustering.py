@@ -1,7 +1,8 @@
 import random
 from collections import defaultdict, deque
+from typing import List
 
-from AI_BoT.common.constants import *
+from common.constants import *
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
@@ -298,3 +299,27 @@ def visualize_ascii(map_grid, units, clusters, cluster_symbols=None):
         text.append(row)
 
     return "\n".join(text)
+
+def complex_clustering(
+        units: List[dict],
+        grid,
+        filter_predicate = None
+) -> list:
+    units_positions = []
+    for unit in units:
+        if filter_predicate is None:
+            units_positions.append(unit[POS_KEY])
+        else:
+            if filter_predicate(unit):
+                units_positions.append(unit[POS_KEY])
+    if not units_positions:
+        return []
+    pf = AStar(grid)
+    centers, clusters = kmeans_hex(pf, units_positions, k=3)
+    # кластеризация по степени близости
+    # prox_clusters = cluster_by_proximity(pf, units_poses, grid, max_range=2)
+    # кластеризация с перекрытием
+    clusters = soft_clustering(units_positions, centers, pf, move_range=5)
+    # все юниты
+    clusters['all'] = units_positions
+    return list(clusters.values())

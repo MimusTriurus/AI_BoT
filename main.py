@@ -3,12 +3,12 @@ from typing import List
 
 from AI_BoT.game_loop import game_loop
 from AI_BoT.move_and_attack import (
-    calculate_move_and_attack_for_units_plans,
-    calculate_move_and_attack_for_units_plans_using_transports
+    calculate_move_and_attack_plans,
+    calculate_move_and_attack_transport_plans
 )
 
 from common.units_loader import MultiUnitsLoader
-from resource_manager import units_storages, my_units_storage, en_units_storage, transport_storage, get_free_units
+from AI_BoT.resource_manager import units_storages, my_units_storage, en_units_storage, transport_storage, get_free_units
 from transport_plan import TransportPlan
 from transport_plan_optimization import TransportPlanOptimizer
 
@@ -30,13 +30,14 @@ if __name__ == '__main__':
     transport_plans: List[TransportPlan] = []
 
     # планы на атаку целей юнитами без транспортов
-    transport_plans += calculate_move_and_attack_for_units_plans(
+    transport_plans += calculate_move_and_attack_plans(
         my_units_storage.get_units(),
         en_units_storage.get_units(),
         UTILITY_THRESHOLD
     )
+
     # просчитываем планы атаки целей боевыми юнитами с использованием транспортов
-    transport_plans += calculate_move_and_attack_for_units_plans_using_transports(
+    transport_plans += calculate_move_and_attack_transport_plans(
         my_units_storage.units,
         transport_storage.get_units(),
         en_units_storage.get_units(),
@@ -61,6 +62,30 @@ if __name__ == '__main__':
 
     print(f"Unused combat units: {len(unused_units)}")
     print(f"Unused transports: {len(unused_transports)}")
+    print(f"Alive targets: {len(free_targets)}")
+
+    transport_plans = []
+
+    transport_plans += calculate_move_and_attack_plans(
+        combat_units=list(unused_units.values()),
+        enemy_units=free_targets,
+        utility_threshold=UTILITY_THRESHOLD,
+        mp_increaser=2
+    )
+
+    transport_plans += calculate_move_and_attack_transport_plans(
+        my_units=unused_units,
+        transport_units=unused_transports,
+        enemy_units=free_targets,
+        utility_threshold=UTILITY_THRESHOLD,
+        transport_mp_increaser=2
+    )
+
+    sorted_solution = sorted(transport_plans, key=lambda p: p.utility, reverse=True)
+    optimizer = TransportPlanOptimizer(transport_plans)
+    actual_plans_2_move, total_utility = optimizer.optimize_hybrid()
+
+    actual_plans += actual_plans_2_move
 
     game_loop(actual_plans)
 

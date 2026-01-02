@@ -4,7 +4,7 @@ from AI_BoT.common.constants import POS_KEY, ID_KEY, DAMAGE_KEY
 from AI_BoT.common.helpers import insert_after
 from AI_BoT.game_map import grid
 from AI_BoT.visualizer import HexVisualizer
-from resource_manager import my_units_storage, en_units_storage, transport_storage
+from AI_BoT.resource_manager import my_units_storage, en_units_storage, transport_storage
 
 def game_loop(actual_plans: list):
     visualizer = HexVisualizer(grid)
@@ -34,8 +34,6 @@ def game_loop(actual_plans: list):
         transport_route = list(t_full_route)
         for pos, waiting in insertions.items():
             for i in range(waiting):
-                if t_start_pos == pos:
-                    continue
                 insert_after(transport_route, pos, pos)
             i = 0
             end_of_head_idx = transport_route.index(pos)
@@ -89,6 +87,9 @@ def game_loop(actual_plans: list):
         t_idx = next(i for i, obj in enumerate(en_units_storage.get_units()) if obj[ID_KEY] == t_id)
 
         for passenger in plan.passengers:
+            # юнит в транспорте и не может атаковать
+            if not plan.unload_map.get(passenger[ID_KEY]):
+                continue
             u_id = passenger[ID_KEY]
             u_idx = next(i for i, obj in enumerate(my_units_storage.get_units()) if obj[ID_KEY] == u_id)
             solution['assignments'].append({

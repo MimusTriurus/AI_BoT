@@ -12,7 +12,9 @@ def solve_transport_mission(
         drop_zone: Tuple[int, int],
         enemies: List[dict],
         grid: HexGrid,  # HexGrid
-        pf: AStar
+        pf: AStar,
+        transport_mp_increaser: int = 1,
+        other_obstacles: List[Tuple[int, int]] = [],
 ) -> tuple[Optional[tuple], float, list]:
     # Список для глобальной очистки (чтобы вернуть сетку в исходное состояние)
     mission_obstacles = []
@@ -42,6 +44,11 @@ def solve_transport_mission(
                 grid.add_obstacle(enemy_pos)
                 mission_obstacles.append(enemy_pos)
 
+        for obstacle_pos in other_obstacles:
+            if not grid.has_obstacle(obstacle_pos):
+                grid.add_obstacle(obstacle_pos)
+                mission_obstacles.append(obstacle_pos)
+
         best_sequence = None
         min_mp_cost = float('inf')
         best_full_path = []
@@ -57,7 +64,7 @@ def solve_transport_mission(
             sequence_removed_obstacles = []
 
             try:
-                # --- Этап А: Сбор пассажиров ---
+                # --- Этап А: Сбор пассажиров (ЗА ОДИН ХОД) ---
                 for target_unit in sequence:
                     # костыль для юнитов которые могут атаковать без транспорта.
                     # условно говоря юнит это транспорт, который перевозит пушку и не может ее никуда выгрузить и стреляет с точки выгрузки
@@ -101,9 +108,7 @@ def solve_transport_mission(
                         break
 
                     current_accumulated_cost += best_leg_cost
-                    path_nodes = best_leg_path if isinstance(best_leg_path, list) else getattr(best_leg_path, 'nodes',
-                                                                                               [])
-
+                    path_nodes = best_leg_path if isinstance(best_leg_path, list) else getattr(best_leg_path, 'nodes', [])
                     if full_path_hexes:
                         full_path_hexes.extend(path_nodes[1:])
                     else:
@@ -121,8 +126,8 @@ def solve_transport_mission(
                     if path_drop:
                         cost_drop = grid.calculate_cost(path_drop)
                         total_cost = current_accumulated_cost + cost_drop
-
-                        if total_cost <= transport_mp:
+                        # возможен ли путь до цели с учетом будущих (опционально) ходов
+                        if total_cost <= transport_mp * transport_mp_increaser:
                             if total_cost < min_mp_cost:
                                 min_mp_cost = total_cost
                                 best_sequence = sequence
@@ -147,6 +152,45 @@ def solve_transport_mission(
     finally:
         # 4. ГЛОБАЛЬНАЯ ОЧИСТКА
         # Убираем пассажиров И всех врагов из списка препятствий сетки
+        for obs in mission_obstacles:
+            if grid.has_obstacle(obs):
+                grid.remove_obstacle(obs)
+
+def solve_move_mission(
+        unit_pos: Tuple[int, int],
+        unit_mp: int,
+        pos_2_attack: Tuple[int, int],
+        enemies: List[dict],
+        other_obstacles: List[Tuple[int, int]],
+        grid: HexGrid,
+        pf: AStar
+) -> List[Tuple[int, int]]:
+    mission_obstacles = []
+
+    for enemy in enemies:
+        enemy_pos = enemy[POS_KEY]
+        if enemy_pos == pos_2_attack:
+            pass
+
+        if not grid.has_obstacle(enemy_pos):
+            grid.add_obstacle(enemy_pos)
+            mission_obstacles.append(enemy_pos)
+
+    for obstacle in other_obstacles:
+        if not grid.has_obstacle(obstacle):
+            grid.add_obstacle(obstacle)
+            mission_obstacles.append(obstacle)
+
+    try:
+        path = pf.find_path(unit_pos, pos_2_attack)
+
+        if path:
+            cost = grid.calculate_cost(path) if isinstance(path, list) else getattr(path, 'cost', len(path))
+            if cost <= unit_mp:
+                return path
+            else:
+                return []
+    finally:
         for obs in mission_obstacles:
             if grid.has_obstacle(obs):
                 grid.remove_obstacle(obs)

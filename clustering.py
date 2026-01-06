@@ -2,6 +2,7 @@ import random
 from collections import defaultdict, deque
 from typing import List
 
+from AI_BoT.data_structures import Unit
 from common.constants import *
 from w9_pathfinding.envs import HexGrid, HexLayout
 from w9_pathfinding.pf import IDAStar, AStar
@@ -301,17 +302,17 @@ def visualize_ascii(map_grid, units, clusters, cluster_symbols=None):
     return "\n".join(text)
 
 def complex_clustering(
-        units: List[dict],
+        units: List[Unit],
         grid,
         filter_predicate = None
 ) -> list:
     units_positions = []
     for unit in units:
         if filter_predicate is None:
-            units_positions.append(unit[POS_KEY])
+            units_positions.append(unit.pos)
         else:
             if filter_predicate(unit):
-                units_positions.append(unit[POS_KEY])
+                units_positions.append(unit.pos)
     if not units_positions:
         return []
     pf = AStar(grid)

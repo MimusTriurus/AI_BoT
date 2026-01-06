@@ -1,84 +1,81 @@
 from typing import Dict, List, Tuple, Optional
 from AI_BoT.clustering import complex_clustering
-from AI_BoT.game_map import grid, pf
-from common.constants import ID_KEY, POS_KEY, MAX_ATTACK_RANGE_KEY, MOVE_RANGE_KEY, MIN_ATTACK_RANGE_KEY, CAPACITY_KEY
+from AI_BoT.common.reachable_positions_calculator import PathInfo
+from AI_BoT.data_structures import Unit
+from AI_BoT.game_map import grid, pf_
 from transport_mission_solver import solve_transport_mission, solve_move_mission
-from transport_plan import TransportPlan
+from transport_plan import TacticPlan
 from common.helpers import find_unload_positions, find_attack_positions_for_unit, generate_transport_loads, get_units_by_positions
 from w9_pathfinding.envs import HexGrid
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.mapf import CBS, SpaceTimeAStar, ReservationTable, MultiAgentAStar
 
 def calculate_move_and_attack_plans(
-        combat_units: list,
-        enemy_units: list,
+        my_units: List[Unit],
+        enemy_units: List[Unit],
+        reserved_positions: List[Tuple[int, int]],
         utility_threshold: float = 0.0,
-        mp_increaser: int = 1,
-        other_obstacles: List[Tuple[int, int]] = []
+        is_future: bool = False,
 ):
-    plans: List[TransportPlan] = []
+    plans: List[TacticPlan] = []
 
-    for unit in combat_units:
-        # todo: remove after tests
-        #continue
-        unit_pos = unit[POS_KEY]
+    for unit in my_units:
         for target in enemy_units:
             # move_range == 0 т.к. мы пришли в точку атаки на своих двоих
             positions_4_attack = find_attack_positions_for_unit(
                 grid=grid,
-                target_pos=target[POS_KEY],
+                target_pos=target.pos,
                 move_range=0,
-                max_weapon_range=unit[MAX_ATTACK_RANGE_KEY],
-                min_weapon_range=unit[MIN_ATTACK_RANGE_KEY]
+                max_weapon_range=unit.wr[1],
+                min_weapon_range=unit.wr[0]
             )
             for position_4_attack in positions_4_attack:
-                path = solve_move_mission(
-                    unit_pos,
-                    unit[MOVE_RANGE_KEY] * mp_increaser,
-                    position_4_attack,
-                    enemy_units,
-                    other_obstacles,
-                    grid,
-                    pf
+                path_info = solve_move_mission(
+                    unit=unit,
+                    pos_2_attack=position_4_attack,
+                    enemies=enemy_units,
+                    other_obstacles=reserved_positions,
+                    grid=grid,
+                    is_future=is_future
                 )
-                if path:
-                    actual_path = path[:unit[MOVE_RANGE_KEY] + 1]
+                if path_info:
                     # точка выгрузки совпадает с точкой атаки - т.к. боевой юнит и есть транспорт
                     unload_map = {
-                        unit[ID_KEY]: position_4_attack
+                        unit.id: position_4_attack
                     }
-                    tp = TransportPlan(
+                    tp = TacticPlan(
                         transport=unit,
                         target=target,
                         passengers=[unit],
-                        path=actual_path,
+                        path_info=path_info,
                         unload_map=unload_map,
                         grid=grid,
-                        pf=pf
+                        pf=pf_
                     )
                     if tp.utility > utility_threshold:
-                        if mp_increaser > 1:
+                        if is_future:
                             tp.unload_map = {}
                         plans.append(tp)
     return plans
 
 def calculate_move_and_attack_transport_plans(
-        my_units: Dict[Tuple[int, int], dict],
-        transport_units: list,
-        enemy_units: list,
+        my_units: Dict[Tuple[int, int], Unit],
+        transport_units: List[Unit],
+        enemy_units: List[Unit],
+        reserved_positions: List[Tuple[int, int]],
         utility_threshold: float = 0.0,
-        transport_mp_increaser: int = 1,
-        other_obstacles: List[Tuple[int, int]] = []
+        transport_mp_increaser: int = 1
 ):
     # region clustering
-    def is_unit_can_be_unloaded(u: dict) -> bool:
-        return u[MOVE_RANGE_KEY] - 1 > 0
+    def is_unit_can_be_unloaded(u: Unit) -> bool:
+        return u.mp - 1 > 0
 
+    predicate_4_clusterization = is_unit_can_be_unloaded if transport_mp_increaser == 1 else None
     # в кластеры включаем только тех юнитов которые могут выгрузиться и атаковать в один ход
     units_pos_clusters = complex_clustering(
         list(my_units.values()),
         grid,
-        is_unit_can_be_unloaded
+        predicate_4_clusterization
     )
     # todo: КОСТЫЛЬ на время - удаляем кластер со всеми юнитами
     units_pos_clusters = units_pos_clusters[:-1]
@@ -87,10 +84,10 @@ def calculate_move_and_attack_transport_plans(
     transport_plans = []
 
     for transport in transport_units:
-        transport_pos = transport[POS_KEY]
-        transport_capacity = transport[CAPACITY_KEY]
+        transport_pos = transport.pos
+        transport_capacity = transport.capacity
         transport_loads = generate_transport_loads(units_pos_clusters, transport_capacity)
-        transport_mp = transport[MOVE_RANGE_KEY]
+        transport_mp = transport.mp
         for target in enemy_units:
             for transport_load in transport_loads:
                 for units_pos in transport_load:
@@ -102,31 +99,33 @@ def calculate_move_and_attack_transport_plans(
                             transport_mp=transport_mp,
                             passengers=units_pos,
                             drop_zone=position_2_unload,
-                            enemies=enemy_units, # для блокировки гексов
+                            enemies=enemy_units,                    # для блокировки\резервирования гексов
+                            reserved_positions=reserved_positions,  # для блокировки\резервирования гексов
                             grid=grid,
-                            pf=pf,
+                            pf=pf_,
                             transport_mp_increaser=transport_mp_increaser
                         )
                         if best_order:
                             drop_zone = path[-1]
-                            actual_path = path[:transport[MOVE_RANGE_KEY] + 1]
+                            actual_path = path[:transport.mp + 1]
+                            path_info = PathInfo(cost, actual_path)
                             passengers = get_units_by_positions(my_units, list(best_order))
-                            unload_map, total_damage = TransportPlan.solve_best_unload_configuration(
+                            unload_map, total_damage = TacticPlan.solve_best_unload_configuration(
                                 drop_zone=drop_zone,
-                                target_pos=target[POS_KEY],
+                                target_pos=target.pos,
                                 passengers=passengers,
                                 enemies=enemy_units,  # для блокировки гексов
                                 grid=grid,
-                                pf=pf
+                                pf=pf_
                             )
-                            tp = TransportPlan(
+                            tp = TacticPlan(
                                 transport=transport,
                                 target=target,
                                 passengers=passengers,
-                                path=actual_path,
+                                path_info=path_info,
                                 unload_map=unload_map,
                                 grid=grid,
-                                pf=pf
+                                pf=pf_
                             )
                             if tp.utility > utility_threshold:
                                 # мы планировали план транспортировки юнитов на более чем один ход, поэтому очищаем план выгрузки

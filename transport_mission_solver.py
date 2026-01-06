@@ -2,6 +2,8 @@ from itertools import permutations
 from typing import Tuple, List, Optional
 
 from AI_BoT.common.constants import POS_KEY
+from AI_BoT.common.reachable_positions_calculator import PathInfo
+from AI_BoT.data_structures import Unit
 from w9_pathfinding.envs import HexGrid
 from w9_pathfinding.pf import IDAStar, AStar
 
@@ -10,12 +12,12 @@ def solve_transport_mission(
         transport_mp: int,
         passengers: List[Tuple[int, int]],
         drop_zone: Tuple[int, int],
-        enemies: List[dict],
+        enemies: List[Unit],
+        reserved_positions: List[Tuple[int, int]],
         grid: HexGrid,  # HexGrid
         pf: AStar,
-        transport_mp_increaser: int = 1,
-        other_obstacles: List[Tuple[int, int]] = [],
-) -> tuple[Optional[tuple], float, list]:
+        transport_mp_increaser: int = 1
+) -> Optional[Tuple[Optional[tuple], float, list]]:
     # Список для глобальной очистки (чтобы вернуть сетку в исходное состояние)
     mission_obstacles = []
 
@@ -31,7 +33,7 @@ def solve_transport_mission(
         # 2. Добавляем ВСЕХ ВРАГОВ
         # Враги - это статичные препятствия для движения транспорта.
         for enemy in enemies:
-            enemy_pos = enemy[POS_KEY]
+            enemy_pos = enemy.pos
             # Защита: Drop Zone не должна быть занята врагом (иначе туда не приехать).
             # Но если drop_zone это соседняя клетка, то все ок.
             if enemy_pos == drop_zone:
@@ -44,10 +46,10 @@ def solve_transport_mission(
                 grid.add_obstacle(enemy_pos)
                 mission_obstacles.append(enemy_pos)
 
-        for obstacle_pos in other_obstacles:
-            if not grid.has_obstacle(obstacle_pos):
-                grid.add_obstacle(obstacle_pos)
-                mission_obstacles.append(obstacle_pos)
+        for reserved_pos in reserved_positions:
+            if not grid.has_obstacle(reserved_pos):
+                grid.add_obstacle(reserved_pos)
+                mission_obstacles.append(reserved_pos)
 
         best_sequence = None
         min_mp_cost = float('inf')
@@ -120,7 +122,7 @@ def solve_transport_mission(
                 # --- Этап Б: Доставка к цели ---
                 if is_sequence_valid:
                     # Путь к drop_zone.
-                    # Благодаря setup-фазе, A* будет огибать всех врагов.
+                    # Благодаря setup-фазе, A* будет огибать всех врагов\пассажиров.
                     path_drop = pf.find_path(current_pos, drop_zone)
 
                     if path_drop:
@@ -157,18 +159,17 @@ def solve_transport_mission(
                 grid.remove_obstacle(obs)
 
 def solve_move_mission(
-        unit_pos: Tuple[int, int],
-        unit_mp: int,
+        unit: Unit,
         pos_2_attack: Tuple[int, int],
-        enemies: List[dict],
+        enemies: List[Unit],
         other_obstacles: List[Tuple[int, int]],
         grid: HexGrid,
-        pf: AStar
-) -> List[Tuple[int, int]]:
+        is_future: bool = False
+) -> Optional[PathInfo]:
     mission_obstacles = []
 
     for enemy in enemies:
-        enemy_pos = enemy[POS_KEY]
+        enemy_pos = enemy.pos
         if enemy_pos == pos_2_attack:
             pass
 
@@ -182,14 +183,12 @@ def solve_move_mission(
             mission_obstacles.append(obstacle)
 
     try:
-        path = pf.find_path(unit_pos, pos_2_attack)
-
-        if path:
-            cost = grid.calculate_cost(path) if isinstance(path, list) else getattr(path, 'cost', len(path))
-            if cost <= unit_mp:
-                return path
-            else:
-                return []
+        path_info: Optional[PathInfo] = None
+        if not is_future:
+            path_info = unit.reachability_cache.get_path(pos_2_attack, unit.mp)
+        else:
+            path_info = unit.reachability_cache.get_closest_reachable(pos_2_attack, unit.mp)
+        return path_info
     finally:
         for obs in mission_obstacles:
             if grid.has_obstacle(obs):

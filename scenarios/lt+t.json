@@ -3,7 +3,7 @@
     {"id": "T_1",  "pos": [1, 0],  "type": "TANK"                                      }
   ],
   "en_units_storage": [
-    {"id": "#1",    "pos": [9, 1],  "type": "ABSTRACT_TARGET"                               }
+    {"id": "#1",    "pos": [7, 1],  "type": "ABSTRACT_TARGET"                               }
   ],
   "transports": [
     {"id": "LT_1",  "pos": [1, 1],  "type": "LAND_TRANSPORT"                                }

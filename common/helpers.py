@@ -2,6 +2,7 @@ from itertools import combinations
 from typing import List, Tuple, Dict, Optional
 
 from AI_BoT.common.constants import *
+from AI_BoT.data_structures import Unit
 from w9_pathfinding.envs import HexGrid
 
 def find_attack_positions_for_unit(
@@ -51,8 +52,8 @@ def find_attack_positions_for_unit(
     return result
 
 
-def find_unload_positions(grid, target: Dict, units: List[Dict]) -> List[Tuple[int, int]]:
-    target_pos = target[POS_KEY]
+def find_unload_positions(grid, target: Unit, units: List[Unit]) -> List[Tuple[int, int]]:
+    target_pos = target.pos
     # Находим все возможные позиции атаки для каждого юнита
     unit_attack_positions = []
     for unit in units:
@@ -60,8 +61,8 @@ def find_unload_positions(grid, target: Dict, units: List[Dict]) -> List[Tuple[i
         positions = find_attack_positions_for_unit(
             grid=grid,
             target_pos=target_pos,
-            move_range=unit[MOVE_RANGE_KEY] - UNIT_MOVE_RANGE_AFTER_UNLOAD,
-            max_weapon_range=unit[MAX_ATTACK_RANGE_KEY],
+            move_range=unit.mp - UNIT_MOVE_RANGE_AFTER_UNLOAD,
+            max_weapon_range=unit.wr[1],
         )
         unit_attack_positions.append(set(positions))
 
@@ -75,11 +76,11 @@ def find_unload_positions(grid, target: Dict, units: List[Dict]) -> List[Tuple[i
 
     if not common_positions:
         # Если нет общих позиций, берем позицию для юнита с наименьшей дальностью
-        min_attack_range = min(unit[MAX_ATTACK_RANGE_KEY] for unit in units)
+        min_attack_range = min(unit.wr[1] for unit in units)
 
         min_range_positions = []
         for unit in units:
-            attack_range = unit[MAX_ATTACK_RANGE_KEY]
+            attack_range = unit.wr[1]
             if attack_range == min_attack_range:
                 min_range_positions = find_attack_positions_for_unit(
                     grid=grid,
@@ -118,7 +119,7 @@ def get_units_could_unload(units: List[dict]) -> List[dict]:
             result.append(unit)
     return result
 
-def get_units_by_positions(units: Dict[Tuple[int, int], dict], units_pos: List[Tuple[int, int]] = None) -> List[dict]:
+def get_units_by_positions(units: Dict[Tuple[int, int], Unit], units_pos: List[Tuple[int, int]] = None) -> List[Unit]:
     if units_pos:
         results = []
         for u_p in units_pos:

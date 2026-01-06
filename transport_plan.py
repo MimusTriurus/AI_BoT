@@ -1,24 +1,28 @@
 from math import log2
 from typing import List, Dict, Tuple, Optional, Set
+
+from AI_BoT.common.reachable_positions_calculator import PathInfo
+from AI_BoT.data_structures import Unit
 from w9_pathfinding.pf import IDAStar, AStar
 from w9_pathfinding.envs import HexGrid
 from common.constants import *
 
-class TransportPlan:
+class TacticPlan:
     def __init__(
             self,
-            transport: dict,
-            target: dict,
-            passengers: List[dict],
-            path: List[Tuple[int, int]],
+            transport: Unit,
+            target: Unit,
+            passengers: List[Unit],
+            path_info: PathInfo,
             unload_map: Dict[str, Tuple[int, int]],
             grid: HexGrid,
             pf: AStar
     ):
-        self.transport: dict = transport
-        self.target: dict = target
-        self.passengers: List[dict] = passengers
-        self.path: List[Tuple[int, int]] = path
+        self.transport: Unit = transport
+        self.target: Unit = target
+        self.passengers: List[Unit] = passengers
+        self.path: List[Tuple[int, int]] = path_info.path
+        self.path_cost: float = path_info.cost
         # вариант разгрузки юнитов
         self.unload_map = unload_map
         self.grid: HexGrid = grid
@@ -26,7 +30,7 @@ class TransportPlan:
 
         # пока костыль - транспортируем сами себя
         self.transit_ourself: bool = False
-        if len(self.passengers) == 1 and passengers[0][POS_KEY] == self.transport[POS_KEY]:
+        if len(self.passengers) == 1 and passengers[0].pos == self.transport.pos:
             self.transit_ourself = True
 
         self.meeting_points: Dict[str, Tuple[int, int]] = self.calculate_meeting_points()
@@ -44,8 +48,8 @@ class TransportPlan:
         result = dict()
         for p in self.path:
             for passenger in self.passengers:
-                p_id = passenger[ID_KEY]
-                if self.grid.adjacent(passenger[POS_KEY], p) and p_id not in result:
+                p_id = passenger.id
+                if self.grid.adjacent(passenger.pos, p) and p_id not in result:
                     result[p_id] = p
         return result
 
@@ -63,10 +67,9 @@ class TransportPlan:
         оптимальной расстановки выгрузки (self.unload_map).
         """
         total_damage = 0.0
-        target_pos = self.target[POS_KEY]
-
+        target_pos = self.target.pos
         for unit in self.passengers:
-            unit_id = unit[ID_KEY]
+            unit_id = unit.id
             unload_pos = self.unload_map.get(unit_id)
 
             if unload_pos:
@@ -74,8 +77,8 @@ class TransportPlan:
                 dist = self.grid.calculate_cost(path)
 
                 # Если юнит достает до цели с назначенной ему точки выгрузки
-                if dist <= unit[MAX_ATTACK_RANGE_KEY]:
-                    total_damage += unit[DAMAGE_KEY]
+                if dist <= unit.mp + unit.wr[1]:
+                    total_damage += unit.wd[0] + unit.wd[1]
 
         return total_damage
 
@@ -89,9 +92,9 @@ class TransportPlan:
         # Используем метод сетки для точного расчета (учет дорог, болот и т.д.)
         transport_path_cost = self.grid.calculate_cost(self.delivery_path)
 
-        target_hp = self.target[HP_KEY]
-        target_val = self.target[VALUE_KEY]
-        target_pos = self.target[POS_KEY]
+        target_hp = self.target.hp
+        target_val = self.target.value
+        target_pos = self.target.pos
 
         actual_damage = self.actual_damage_contribution
 
@@ -102,31 +105,29 @@ class TransportPlan:
         cost_denominator = max(0.5, transport_path_cost)
 
         for unit in self.passengers:
-            dmg = unit[DAMAGE_KEY]
+            dmg = unit.wd[0] + unit.wd[1]
             total_potential_damage += dmg
-            # --- ПРОВЕРКА: МОЖЕТ ЛИ ЮНИТ ДОЙТИ САМ? ---
-            # Используем AStar, чтобы проверить реальную проходимость.
-            # Находим путь от юнита до цели.
-            walk_path = self.pf.find_path(unit[POS_KEY], target_pos)
-
             can_reach_on_foot = False
 
-            if walk_path:
-                # Стоимость прохода пешком
-                walk_cost = self.grid.calculate_cost(walk_path)
+            if unit.id in self.unload_map:
+                # todo: не уверен в решении - типо юнит может добраться в точку выгрузки транспортом и сам
+                pos_2_attack =  self.unload_map.get(unit.id)
+                walk_path_info: PathInfo = unit.reachability_cache.get_path(pos_2_attack, unit.mp)
+                if walk_path_info:
+                    walk_cost = walk_path_info.cost
+                    attack_range_discount = unit.wr[1]
+                    adjusted_walk_cost = max(0, int(walk_cost - attack_range_discount))
 
-                # Эвристика для дистанционной атаки:
-                # Юниту не обязательно вставать НА цель, достаточно подойти на radius_attack.
-                # Предполагаем, что последние N шагов (равные радиусу) можно не делать.
-                # Это грубая оценка, но эффективная.
-                attack_range_discount = unit.get(MAX_ATTACK_RANGE_KEY, 1)
-                adjusted_walk_cost = max(0, walk_cost - attack_range_discount)
+                    if adjusted_walk_cost <= unit.mp:
+                        can_reach_on_foot = True
 
-                if adjusted_walk_cost <= unit[MOVE_RANGE_KEY]:
-                    can_reach_on_foot = True
-
-            cost_path_2_target = self.grid.calculate_cost(self.pf.find_path(self.unload_map[unit[ID_KEY]], self.target[POS_KEY]))
-            is_unit_attacking = self.unload_map.get(unit[ID_KEY]) is not None and cost_path_2_target <= unit[MAX_ATTACK_RANGE_KEY]
+            cost_path_2_target = self.grid.calculate_cost(
+                self.pf.find_path(
+                    self.unload_map[unit.id],
+                    self.target.pos
+                )
+            )
+            is_unit_attacking = self.unload_map.get(unit.id) is not None and cost_path_2_target <= (unit.wr[1] + unit.mp)
 
             if is_unit_attacking:
                 if can_reach_on_foot:
@@ -136,31 +137,27 @@ class TransportPlan:
 
         if actual_damage == 0.0:
             return 0.0
-
+            actual_damage = 0.01
         # А нужно ли нам грузить юнит если он может атаковать цель и сам?
         if damage_available_on_foot > 0.0 and not self.transit_ourself:
             return 0
-
         if transport_path_cost < 0.1 and damage_available_on_foot >= target_hp:
             return 0
-        # --- ЛОГИКА ОЦЕНКИ ---
-
-        # 1. Взвешиваем урон (Marginal Utility)
         # Урон, требующий транспорта -> Вес 1.0 (Высокий приоритет)
         # Урон, доступный пешком -> Вес 0.1 (Низкий приоритет, используем транспорт только если некуда девать)
         weighted_damage = (damage_added_by_transport * 1) + (damage_available_on_foot * 0.1)
 
         # Коэффициент качества плана (0.0 - 1.0)
-        # Используем actual_damage как нормализатор для весов.
+        # actual_damage как нормализатор для весов.
         transport_relevance = weighted_damage / actual_damage
 
-        # 2. Эффективность по здоровью (Capping)
-        real_damage_dealt = min(actual_damage, target_hp)  # <--- ИСПОЛЬЗУЕМ actual_damage
+        # Эффективность по здоровью
+        real_damage_dealt = min(actual_damage, target_hp)
 
-        # Применяем релевантность транспорта к нанесенному урону
+        # релевантность транспорта к нанесенному урону
         utility_score_base = real_damage_dealt * transport_relevance
 
-        # 3. Бонус за убийство (Kill Bonus)
+        # онус за убийство
         kill_multiplier = 1.0
         if actual_damage >= target_hp:  # <--- ИСПОЛЬЗУЕМ actual_damage
             if damage_available_on_foot >= target_hp:
@@ -168,16 +165,15 @@ class TransportPlan:
             else:
                 kill_multiplier = 4.0
 
-        # 4. Штраф за Оверхед (Waste Penalty)
+        # Штраф за оверхед по урону
         # Штрафуем только за УРОН, который реально мог быть нанесен, но превышает HP цели.
-        waste_damage = max(0, actual_damage - target_hp)  # <--- ИСПОЛЬЗУЕМ actual_damage
+        waste_damage = max(0.0, actual_damage - target_hp)
         waste_penalty = log2(1 + waste_damage)
 
-        # --- ИТОГОВАЯ ФОРМУЛА ---
         numerator = (utility_score_base * target_val * kill_multiplier) - waste_penalty
 
         final_utility = max(0.0, numerator / cost_denominator)
-        # На подумать...
+        # todo: На подумать...
         '''
         # === Учитываем коэффициент загрузки ===
         capacity = self.transport.get(CAPACITY_KEY, len(self.passengers))
@@ -198,12 +194,12 @@ class TransportPlan:
     def __str__(self):
         passengers_id = []
         for u in self.passengers:
-            u_id = u[ID_KEY]
+            u_id = u.id
             passengers_id.append(u_id)
         passengers_id = sorted(passengers_id)
         passengers_str = ', '.join(passengers_id)
 
-        mp_max = self.transport[MOVE_RANGE_KEY]
+        mp_max = self.transport.mp
         mp_use = int(self.grid.calculate_cost(self.path))
 
         unloading_str = ''
@@ -211,22 +207,22 @@ class TransportPlan:
             unloading_str += f'{u_id} {pos} '
 
         return (
-            f"Transport: {self.transport[ID_KEY]} took units {passengers_str} "
+            f"Transport: {self.transport.id} took units {passengers_str} "
             f"and transit to unload position {self.path[-1]}\n"
-            f"Units attack target {self.target[ID_KEY]} {self.target[POS_KEY]} from positions: {unloading_str}\n"
+            f"Units attack target {self.target.id} {self.target.id} from positions: {unloading_str}\n"
             f"MP: [{mp_use}/{mp_max}]\n"
             f"Utility: [{self.utility}]"
         )
 
     def to_path(self):
-        return self.transport[ID_KEY], self.path
+        return self.transport.id, self.path
 
     @staticmethod
     def solve_best_unload_configuration(
             drop_zone: Tuple[int, int],
             target_pos: Tuple[int, int],
-            passengers: List[dict],
-            enemies: List[Tuple[int, int]],
+            passengers: List[Unit],
+            enemies: List[Unit],
             grid: HexGrid,
             pf: AStar
     ) -> Tuple[Dict[str, Tuple[int, int]], float]:
@@ -239,7 +235,7 @@ class TransportPlan:
         available_hexes = []
         blocked_set = set()
         for en in enemies:
-            blocked_set.add(en[POS_KEY])
+            blocked_set.add(en.pos)
 
         for h, _ in neighbors:
             if not grid.has_obstacle(h) and h not in blocked_set:
@@ -288,12 +284,12 @@ class TransportPlan:
                 # Проверка дистанции атаки
                 path = pf.find_path(hex_pos, target_pos)
                 dist = grid.calculate_cost(path)
-                if dist <= unit[MAX_ATTACK_RANGE_KEY]:
-                    dmg = unit[DAMAGE_KEY]
+                if dist <= unit.wr[1]:
+                    dmg = unit.wd[0] + unit.wd[1]
                 else:
                     dmg = 0.0  # Юнит высадился, но не достает
 
-                current_mapping[unit[ID_KEY]] = hex_pos
+                current_mapping[unit.id] = hex_pos
                 current_damage += dmg
 
             if current_damage > max_total_damage:

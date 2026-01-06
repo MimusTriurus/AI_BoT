@@ -4,6 +4,9 @@ import math
 from typing import List, Dict, Tuple
 from enum import Enum
 
+from AI_BoT.data_structures import Unit
+from AI_BoT.game_map import map_of_passage, map_data
+
 
 class AnimationState(Enum):
     IDLE = 0
@@ -41,17 +44,17 @@ class HexVisualizer:
         self.width = width
         self.height = height
 
-        self.hex_size = 30
-        self.hex_width = self.hex_size * 2
-        self.hex_height = math.sqrt(3) * self.hex_size
+        self.hex_size = 25
+        self.hex_width = self.hex_size * 1.9
+        self.hex_height = math.sqrt(3.5) * self.hex_size
 
-        self.offset_x = 100
-        self.offset_y = 100
+        self.offset_x = 50
+        self.offset_y = 50
 
         # Цвета
         self.COLORS = {
             'background': (20, 20, 30),
-            'hex_border': (60, 60, 80),
+            'hex_border': (0, 0, 0),
             'hex_walkable': (40, 40, 60),
             'hex_obstacle': (80, 40, 40),
             'hex_highlight': (80, 80, 120),
@@ -63,10 +66,20 @@ class HexVisualizer:
             'target_destroyed': (192, 192, 192),
             'path': (100, 200, 100),
             'attack_range': (255, 100, 100, 100),
-            'text': (220, 220, 220),
+            'text': (255, 255, 255),
             'hp_bar_bg': (60, 60, 60),
             'hp_bar': (80, 200, 80),
             'damage_text': (255, 200, 0)
+        }
+
+        self.GROUD_COLORS = {
+            0: (0, 0, 0),           # None
+            1: (183, 183, 183),     # Road
+            2: (121, 176, 113),     # Plain
+            3: (229, 222, 10),       # Difficult - Desert + Ice + Swamp + River
+            4: (12, 121, 0),        # Former Swamp
+            5: (169, 114, 65),      # Unpassable - Mountain + Chasm
+            6: (32, 112, 203),      # Sea
         }
 
         self.font_small = pygame.font.Font(None, 20)
@@ -102,7 +115,7 @@ class HexVisualizer:
         pygame.draw.polygon(self.screen, color, points, width)
 
         if border_color:
-            pygame.draw.polygon(self.screen, border_color, points, 2)
+            pygame.draw.polygon(self.screen, border_color, points, 3)
 
     def draw_grid(self):
         rows = len(self.grid.weights)
@@ -112,11 +125,8 @@ class HexVisualizer:
             for col in range(cols):
                 center = self.hex_to_pixel((row, col))
 
-                color = (
-                    self.COLORS['hex_obstacle']
-                    if self.grid.has_obstacle((row, col))
-                    else self.COLORS['hex_walkable']
-                )
+                color_idx = map_data[col][row]
+                color = self.GROUD_COLORS[color_idx]
 
                 self.draw_hexagon(center, color, self.COLORS['hex_border'])
 
@@ -273,11 +283,14 @@ class HexVisualizer:
             self.screen.blit(text, (panel_x, y))
             y += 20
 
-    def animate_solution(self, solution: Dict, units: List[Dict], targets: List[Dict]):
-        for target in targets:
+    def animate_solution(self, solution: Dict, units: List[Unit], targets_lst: List[Unit]):
+        targets: List[dict] = list()
+        for t in targets_lst:
+            target = t.__dict__
             if 'current_hp' not in target:
-                target['current_hp'] = target['hp']
-                target['hp_after_attack'] = target['hp']
+                target['current_hp'] = t.hp
+                target['hp_after_attack'] = t.hp
+            targets.append(target)
 
         for u_id, path in solution["paths"].items():
             self.animation_state[u_id] = {
@@ -365,7 +378,7 @@ class HexVisualizer:
                 self.draw_target(target['pos'], target, target_destroyed)
 
             for u_idx, unit in enumerate(units):
-                u_idx = unit['id'] if 'id' in unit else u_idx
+                u_idx = unit.id if 'id' in unit.__dict__ else u_idx
                 if u_idx in self.animation_state:
                     anim = self.animation_state[u_idx]
 
@@ -378,7 +391,7 @@ class HexVisualizer:
                         y = start_pos[1] + (end_pos[1] - start_pos[1]) * anim['progress']
 
                         unit_data = {'id': u_idx}
-                        self.draw_unit(unit['pos'], unit_data, (x, y))
+                        self.draw_unit(unit.pos, unit_data, (x, y))
 
                     elif anim['state'] == AnimationState.ATTACKING:
                         if 'target_idx' in anim:
@@ -395,7 +408,7 @@ class HexVisualizer:
                         self.draw_unit(pos, unit_data)
                 else:
                     unit_data = {'id': u_idx}
-                    self.draw_unit(unit['pos'], unit_data)
+                    self.draw_unit(unit.pos, unit_data)
 
             #self.draw_damage_numbers(dt)
 

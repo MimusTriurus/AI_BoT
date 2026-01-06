@@ -1,12 +1,16 @@
+from typing import List
+
 import pygame
 
 from AI_BoT.common.constants import POS_KEY, ID_KEY, DAMAGE_KEY
 from AI_BoT.common.helpers import insert_after
-from AI_BoT.game_map import grid
+from AI_BoT.data_structures import Unit
+from AI_BoT.game_map import grid, map_data
+from AI_BoT.transport_plan import TacticPlan
 from AI_BoT.visualizer import HexVisualizer
 from AI_BoT.resource_manager import my_units_storage, en_units_storage, transport_storage
 
-def game_loop(actual_plans: list):
+def game_loop(actual_plans: List[TacticPlan]):
     visualizer = HexVisualizer(grid)
     units_paths = dict()
     for plan in actual_plans:
@@ -41,11 +45,11 @@ def game_loop(actual_plans: list):
             while waiting > 0:
                 passengers_id = units_2_load[pos]
                 unit_id = units_2_load[pos][i]
-                passenger = my_units_storage.get_unit_by_id(unit_id)
+                passenger: Unit = my_units_storage.get_unit_by_id(unit_id)
 
                 if unit_id not in units_paths:
                     units_paths[unit_id] = list()
-                passenger_pos = passenger[POS_KEY]
+                passenger_pos = passenger.pos
 
                 for k in range(head_len):
                     units_paths[unit_id].append(passenger_pos)
@@ -65,7 +69,7 @@ def game_loop(actual_plans: list):
             if u_id == t_id:
                 continue
 
-            result = next((item for item in plan.passengers if item[ID_KEY] == u_id), None)
+            result = next((item for item in plan.passengers if item.id == u_id), None)
             if result:
                 path_tail = transport_route[len(path):]
                 path_2_target = []
@@ -83,19 +87,19 @@ def game_loop(actual_plans: list):
     assignment = {}
     for plan in actual_plans:
         target = plan.target
-        t_id = target[ID_KEY]
-        t_idx = next(i for i, obj in enumerate(en_units_storage.get_units()) if obj[ID_KEY] == t_id)
+        t_id = target.id
+        t_idx = next(i for i, obj in enumerate(en_units_storage.get_units()) if obj.id == t_id)
 
         for passenger in plan.passengers:
             # юнит в транспорте и не может атаковать
-            if not plan.unload_map.get(passenger[ID_KEY]):
+            if not plan.unload_map.get(passenger.id):
                 continue
-            u_id = passenger[ID_KEY]
-            u_idx = next(i for i, obj in enumerate(my_units_storage.get_units()) if obj[ID_KEY] == u_id)
+            u_id = passenger.id
+            u_idx = next(i for i, obj in enumerate(my_units_storage.get_units()) if obj.id == u_id)
             solution['assignments'].append({
                 "unit_idx": u_id,
                 "target_idx": t_idx,
-                "damage": passenger[DAMAGE_KEY]
+                "damage": passenger.wd[0] + passenger.wd[1]
             })
 
     units = list(my_units_storage.get_units())
@@ -106,8 +110,8 @@ def game_loop(actual_plans: list):
     while True:
         restart = visualizer.animate_solution(solution, units, targets)
         if restart:
-            for target in targets:
-                target['current_hp'] = target['hp']
+            #for target in targets:
+            #    target['current_hp'] = target.hp
             continue
         else:
             break
